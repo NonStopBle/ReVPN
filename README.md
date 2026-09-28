@@ -1,5 +1,3 @@
-<img width="1102" height="785" alt="ReVPN-Decentralized" src="https://github.com/user-attachments/assets/52d5a24f-e93d-4d16-9c3a-2287e54025bd" /><div align="center">
-
 # ReVPN
 
 **ReVPN: TUN-based mesh networking with UDP hole punching, automatic
