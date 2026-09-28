@@ -12,7 +12,7 @@ that needs nothing but a STUN query and a token.**
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)
 ![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-lightgrey)
 
-Created by **Rezier Labs**.
+Creative by **Rezier Labs**.
 
 No accounts, no cloud control plane, no dashboard to sign into. Run
 one machine as the server (relay/rendezvous), run `ReVPN` on every
