@@ -249,7 +249,7 @@ yourself?") and fills in `--vpn-ip`/`--subnet` for you if you say yes.
 ## Step 8 — Decentralized mode (no server at all)
 
 <p align="center">
-<img width="1102" height="785" alt="ReVPN-Decentralized" src="https://github.com/user-attachments/assets/dabe9fed-e54c-4896-b633-9ddef6f24517" />
+<img width="1102" height="785" alt="ReVPN-overview" src="https://github.com/user-attachments/assets/2def0d9d-3d39-4ab4-83a8-6f97a7a52ac6" />
 </p>
 
 <p align="center"><b>Figure 5:</b> Network-level view of decentralized mode, as opposed to the software/mode diagram elsewhere in the docs. Three independent sites (each its own home or office network, behind its own router) are drawn with their real peer host and VPN tunnel IP. The three thick solid lines are the only actual live network paths in this topology — direct, encrypted, hole-punched UDP tunnels, one per pair of peers, forming a full mesh. The STUN server and the optional relay/rendezvous server are drawn as dashed reference boxes deliberately unconnected to anything: STUN is a one-off "what's my IP" lookup at startup, not a persistent link, and the relay server belongs to <code>--mode server</code>/<code>client</code>, not this topology at all. The editable source is <code>docs/ReVPN-overview.drawio</code>.</p>
