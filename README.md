@@ -127,13 +127,13 @@ and it remembers what you entered for next time.
 <img width="966" height="664" alt="meshbuild" src="https://github.com/user-attachments/assets/0782dd56-9c21-455f-a07e-4c9f709b1469" />
 </p>
 
-<p align="center"><b>Figure 1:</b> Terminal output of <code>./build.sh</code> on a fresh checkout. CMake prints the resolved build configuration — Release mode, LTO on, XDP/libsodium/native-arch/ASAN all off by default — then compiles <code>meshvpn.cpp</code> and links the single <code>build/ReVPN-engine</code> binary that every mode (server, client, decentralized) runs from. A clean run like this, with no errors and a final "Built target ReVPN-engine" line, is what a correct first-time build looks like.</p>
+<p align="center"><b>Figure 1:</b> A clean <code>./build.sh</code> run, producing <code>build/ReVPN-engine</code>.</p>
 
 <p align="center">
   <img width="842" height="614" alt="revpn_help" src="https://github.com/user-attachments/assets/009af72e-4eb7-4ce5-8390-bfd9d3ca128f" />
 </p>
 
-<p align="center"><b>Figure 2:</b> The output of <code>./ReVPN -h</code>, the entry point for every workflow in this README. It lists the five top-level modes the wrapper script can launch — <code>--server</code> (relay/rendezvous), <code>--client</code> (join a server), <code>--decentralized</code> (no server, token-based), <code>--stress</code> (load-test), and <code>--help</code> — plus the config-file and preset-saving flags. Everything that follows in this document is one of these five paths spelled out in detail.</p>
+<p align="center"><b>Figure 2:</b> <code>./ReVPN -h</code> — the five modes: server, client, decentralized, stress, help.</p>
 
 
 ```sh
@@ -150,7 +150,7 @@ This builds `build/ReVPN-engine`, the program the `ReVPN` command drives.
   <img width="885" height="645" alt="mesh_server" src="https://github.com/user-attachments/assets/9a2cb110-ef67-47d9-b716-75a9c0e300a0" />
 </p>
 
-<p align="center"><b>Figure 3:</b> A relay server immediately after startup (<code>sudo ./ReVPN --server --port 9000</code>). It binds <code>0.0.0.0:9000</code>, launches 4 worker threads to handle incoming UDP traffic in parallel, and prints one status line per worker. At this point <code>clients=0</code> across the board because no one has joined yet — this is the baseline you should see before any client connects, and the same status table keeps updating live as clients come and go.</p>
+<p align="center"><b>Figure 3:</b> The relay server just after startup, no clients connected yet.</p>
 
 Pick one computer with a public/reachable IP to be the server everyone
 else connects through:
@@ -174,7 +174,7 @@ On every other computer you want on the network:
   <img width="842" height="614" alt="image_clients" src="https://github.com/user-attachments/assets/88536864-5776-48d0-9bf4-e1220d5e848a" />
 </p>
 
-<p align="center"><b>Figure 4:</b> A client joining the server from Figure 3 (<code>sudo ./ReVPN --client --connect 127.0.0.1:9000 --vpn-ip 10.13.0.2</code>). The banner echoes back exactly what it resolved from the flags — which server it's registering with, the VPN IP it's claiming on the mesh, its derived 32-bit node ID, whether it's using relay or P2P communication, and whether encryption is on. This is the confirmation step before the TUN device comes up; if any of these values look wrong, it's a flag mistake, not a connectivity problem.</p>
+<p align="center"><b>Figure 4:</b> A client joining that server — VPN IP, node ID, and comm mode confirmed.</p>
 
 ```sh
 sudo ./ReVPN --client --connect <server-ip>:9000 --vpn-ip 10.13.0.2
@@ -249,10 +249,10 @@ yourself?") and fills in `--vpn-ip`/`--subnet` for you if you say yes.
 ## Step 8 — Decentralized mode (no server at all)
 
 <p align="center">
-<img width="1102" height="785" alt="ReVPN-Decentralized" src="https://github.com/user-attachments/assets/dabe9fed-e54c-4896-b633-9ddef6f24517" />
+<img width="1102" height="785" alt="ReVPN-overview" src="https://github.com/user-attachments/assets/2def0d9d-3d39-4ab4-83a8-6f97a7a52ac6" />
 </p>
 
-<p align="center"><b>Figure 5:</b> Network-level view of decentralized mode, as opposed to the software/mode diagram elsewhere in the docs. Three independent sites (each its own home or office network, behind its own router) are drawn with their real peer host and VPN tunnel IP. The three thick solid lines are the only actual live network paths in this topology — direct, encrypted, hole-punched UDP tunnels, one per pair of peers, forming a full mesh. The STUN server and the optional relay/rendezvous server are drawn as dashed reference boxes deliberately unconnected to anything: STUN is a one-off "what's my IP" lookup at startup, not a persistent link, and the relay server belongs to <code>--mode server</code>/<code>client</code>, not this topology at all. The editable source is <code>docs/ReVPN-overview.drawio</code>.</p>
+<p align="center"><b>Figure 5:</b> Network topology of decentralized mode — direct tunnels between peer sites, no server.</p>
 
 Everything above needs one machine running `--server` that both sides
 can reach. Decentralized mode drops that requirement entirely — peers
@@ -271,7 +271,7 @@ since there's no server to introduce them).
   <img width="842" height="614" alt="mesh_decent" src="https://github.com/user-attachments/assets/be106294-e9fd-4bb8-9c13-27a48f84b389" />
 </p>
 
-<p align="center"><b>Figure 6:</b> The token-exchange screen mid-flow, right after a decentralized node has bound its UDP socket and queried STUN for its own public address. "Step 1" is the token this node just generated — copy that to whoever you want to mesh with. "Step 2" is where it now waits, ready to accept one token per line, one per peer, terminated by a blank line; this is also the mechanic that makes 3+ peer meshes possible, since the same prompt happily takes more than one token before moving on.</p>
+<p align="center"><b>Figure 6:</b> The token exchange screen — send your token, paste peers' tokens back.</p>
 
 On each side:
 
@@ -397,7 +397,7 @@ packet loss) so you can sanity-check a server before depending on it.
   <img width="889" height="656" alt="tui_ui" src="https://github.com/user-attachments/assets/9b6e4a38-4674-4c99-a2ae-6015085b1e22" />
 </p>
 
-<p align="center"><b>Figure 7:</b> The interactive TUI's main menu, shown automatically when <code>ReVPN</code> is run with no arguments at all — the whiptail-driven, nmtui-style entry point for people who'd rather not memorize flags. Each row maps directly to one of the CLI modes from Figure 2, with a plain-language description next to it; picking one walks through the same fields those flags accept, then shows a confirm screen before actually launching. "Server" is highlighted here simply because it's the first item and default selection, not because it's recommended over the others.</p>
+<p align="center"><b>Figure 7:</b> The TUI main menu — the same five modes, picked from a whiptail screen.</p>
 
 Running `ReVPN` with no arguments opens a full-screen menu (`whiptail`,
 falling back to `dialog`, falling back to plain `--help` text if
