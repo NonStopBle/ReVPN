@@ -127,9 +127,13 @@ and it remembers what you entered for next time.
 <img width="966" height="664" alt="meshbuild" src="https://github.com/user-attachments/assets/0782dd56-9c21-455f-a07e-4c9f709b1469" />
 </p>
 
+<p align="center"><b>Figure 1:</b> <code>./build.sh</code> output — the CMake build configuration banner, confirming a clean Release build of <code>build/ReVPN-engine</code>.</p>
+
 <p align="center">
   <img width="842" height="614" alt="revpn_help" src="https://github.com/user-attachments/assets/009af72e-4eb7-4ce5-8390-bfd9d3ca128f" />
 </p>
+
+<p align="center"><b>Figure 2:</b> <code>./ReVPN -h</code> — the top-level usage banner, showing all five subcommands: <code>--server</code>, <code>--client</code>, <code>--decentralized</code>, <code>--stress</code>, <code>--help</code>.</p>
 
 
 ```sh
@@ -145,6 +149,9 @@ This builds `build/ReVPN-engine`, the program the `ReVPN` command drives.
 <p align="center">
   <img width="885" height="645" alt="mesh_server" src="https://github.com/user-attachments/assets/9a2cb110-ef67-47d9-b716-75a9c0e300a0" />
 </p>
+
+<p align="center"><b>Figure 3:</b> <code>sudo ./ReVPN --server --port 9000</code> running — binding <code>0.0.0.0:9000</code>, spinning up 4 worker threads, and the live per-worker <code>clients / rx / fwd</code> status table right after boot.</p>
+
 Pick one computer with a public/reachable IP to be the server everyone
 else connects through:
 
@@ -166,6 +173,8 @@ On every other computer you want on the network:
 <p align="center">
   <img width="842" height="614" alt="image_clients" src="https://github.com/user-attachments/assets/88536864-5776-48d0-9bf4-e1220d5e848a" />
 </p>
+
+<p align="center"><b>Figure 4:</b> <code>sudo ./ReVPN --client --connect 127.0.0.1:9000 --vpn-ip 10.13.0.2</code> — the client-join banner: VPN IP, server address, <code>comm=p2p</code>, node ID, encryption state.</p>
 
 ```sh
 sudo ./ReVPN --client --connect <server-ip>:9000 --vpn-ip 10.13.0.2
@@ -243,6 +252,8 @@ yourself?") and fills in `--vpn-ip`/`--subnet` for you if you say yes.
 <img width="1102" height="785" alt="ReVPN-Decentralized" src="https://github.com/user-attachments/assets/dabe9fed-e54c-4896-b633-9ddef6f24517" />
 </p>
 
+<p align="center"><b>Figure 5:</b> network topology of a decentralized mesh — three peer sites, each behind its own router/NAT, connected by direct encrypted UDP tunnels; STUN and the optional relay server are shown only as reference, not live connections. See <code>docs/ReVPN-overview.drawio</code> for the editable source.</p>
+
 Everything above needs one machine running `--server` that both sides
 can reach. Decentralized mode drops that requirement entirely — peers
 connect **directly**, with nothing in between but a public STUN
@@ -259,6 +270,8 @@ since there's no server to introduce them).
 <p align="center">
   <img width="842" height="614" alt="mesh_decent" src="https://github.com/user-attachments/assets/be106294-e9fd-4bb8-9c13-27a48f84b389" />
 </p>
+
+<p align="center"><b>Figure 6:</b> the token exchange screen — "Step 1: send this token" / "Step 2: paste peer's token", mid-flow, waiting on <code>Peer's token (blank to finish):</code>.</p>
 
 On each side:
 
@@ -383,6 +396,8 @@ packet loss) so you can sanity-check a server before depending on it.
 <p align="center">
   <img width="889" height="656" alt="tui_ui" src="https://github.com/user-attachments/assets/9b6e4a38-4674-4c99-a2ae-6015085b1e22" />
 </p>
+
+<p align="center"><b>Figure 7:</b> the whiptail main menu — <code>ReVPN</code> run with no arguments, showing all five options (Server / Client / Decentralized / Stress / Help / Quit) with a one-line description each.</p>
 
 Running `ReVPN` with no arguments opens a full-screen menu (`whiptail`,
 falling back to `dialog`, falling back to plain `--help` text if
