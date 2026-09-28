@@ -78,9 +78,6 @@ sides punched through on the first attempt.
 
 ## Quickstart
 
-<p align="center">
-<img width="966" height="664" alt="meshbuild" src="https://github.com/user-attachments/assets/0782dd56-9c21-455f-a07e-4c9f709b1469" />
-</p>
 
 ```sh
 cd ReVPN
@@ -125,6 +122,11 @@ and it remembers what you entered for next time.
 ---
 
 ## Step 1 — Build it (Linux)
+
+<p align="center">
+<img width="966" height="664" alt="meshbuild" src="https://github.com/user-attachments/assets/0782dd56-9c21-455f-a07e-4c9f709b1469" />
+</p>
+
 
 ```sh
 cd ReVPN
