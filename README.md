@@ -160,6 +160,10 @@ want the server machine reachable on the mesh too).
 
 On every other computer you want on the network:
 
+<p align="center">
+  <img width="842" height="614" alt="image_clients" src="https://github.com/user-attachments/assets/88536864-5776-48d0-9bf4-e1220d5e848a" />
+</p>
+
 ```sh
 sudo ./ReVPN --client --connect <server-ip>:9000 --vpn-ip 10.13.0.2
 ```
@@ -231,6 +235,10 @@ yourself?") and fills in `--vpn-ip`/`--subnet` for you if you say yes.
 ---
 
 ## Step 8 — Decentralized mode (no server at all)
+
+<p align="center">
+  <img width="842" height="614" alt="mesh_decent" src="https://github.com/user-attachments/assets/be106294-e9fd-4bb8-9c13-27a48f84b389" />
+</p>
 
 Everything above needs one machine running `--server` that both sides
 can reach. Decentralized mode drops that requirement entirely — peers
