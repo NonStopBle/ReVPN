@@ -1,7 +1,3 @@
-<img width="889" height="656" alt="tui_ui" src="https://github.com/user-attachments/assets/39c0f771-0b9e-4462-9494-5f36bf82d406" /># ReVPN
-
-<div align="center">
-
 # ReVPN
 
 **ReVPN: TUN-based mesh networking with UDP hole punching, automatic
