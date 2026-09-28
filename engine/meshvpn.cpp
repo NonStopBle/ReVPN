@@ -1858,7 +1858,7 @@ bool p2p_parse_token(const std::string& token, P2PPeerToken& out) {
 // Entry point for `--mode decentralized`, called from main() below.
 // Returns a process exit code.
 int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str, int subnet, int mtu,
-                       uint16_t local_udp_port, bool enc, const std::string& peer_token_arg) {
+                       uint16_t local_udp_port, bool enc, const std::vector<std::string>& peer_token_args) {
     Client cli;
     cli.my_vpn     = inet_addr(vpn_ip_str.c_str());
     cli.local_port = local_udp_port;
@@ -1886,40 +1886,71 @@ int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str,
 
     std::string my_token = p2p_make_token(self_id, pub_ip, pub_port, cli.my_vpn, cli.my_node);
     printf("\n============================================================\n"
-           " Step 1 — send this token to your peer (chat, email, voice):\n"
+           " Step 1 — send this token to EVERY peer you want to mesh with\n"
+           " (chat, email, voice):\n"
            "============================================================\n\n"
            "  %s\n\n"
            "============================================================\n"
-           " Step 2 — paste the token THEY send back, below.\n"
+           " Step 2 — paste each peer's token below, one per line.\n"
+           " Leave a line blank when you're done adding peers.\n"
            "============================================================\n\n", my_token.c_str());
 
-    std::string peer_token = peer_token_arg;
-    if (peer_token.empty()) {
-        printf("Peer's token: ");
-        fflush(stdout);
-        std::getline(std::cin, peer_token);
+    // Collect one or more peer tokens: pre-supplied via --peer-token
+    // (repeatable, or comma-separated), or pasted interactively one per
+    // line until a blank line. Every peer needs everyone else's token —
+    // there's no server to introduce them, so mesh size is however many
+    // tokens you hand-exchange.
+    std::vector<std::string> raw_tokens;
+    for (const auto& arg : peer_token_args) {
+        size_t start = 0;
+        while (start <= arg.size()) {
+            size_t comma = arg.find(',', start);
+            std::string tok = arg.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+            if (!tok.empty()) raw_tokens.push_back(tok);
+            if (comma == std::string::npos) break;
+            start = comma + 1;
+        }
     }
-
-    P2PPeerToken peer;
-    if (!p2p_parse_token(peer_token, peer)) {
-        fprintf(stderr, "[Decentralized] That doesn't look like a valid token — "
-                "check it was copied in full, then try again.\n");
+    if (raw_tokens.empty()) {
+        for (;;) {
+            printf("Peer's token (blank to finish): ");
+            fflush(stdout);
+            std::string line;
+            if (!std::getline(std::cin, line) || line.empty()) break;
+            raw_tokens.push_back(line);
+        }
+    }
+    if (raw_tokens.empty()) {
+        fprintf(stderr, "[Decentralized] No peer tokens given — nothing to connect to.\n");
         CLOSESOCK(cli.udp_fd); return 1;
     }
-    printf("\nGot it — punching through to %s now.\n\n", peer.id.c_str());
 
-    // Seed the peer directly — this is the one thing that would normally
-    // come from a server's PEER_INFO packet (see Client::on_peer_info()).
-    Peer p{};
-    p.vpn_ip = peer.vpn_ip;
-    p.node_id = peer.node_id;
-    p.addr.sin_family = AF_INET;
-    p.addr.sin_port = htons(peer.port);
-    inet_pton(AF_INET, peer.ip.c_str(), &p.addr.sin_addr);
-    p.st = P2PSt::PUNCHING;
-    p.t_pstart = now_ms();
-    cli.peers[peer.node_id] = p;
-    cli.vpn_to_node[peer.vpn_ip] = peer.node_id;
+    std::vector<uint32_t> peer_node_ids;
+    for (const auto& tok : raw_tokens) {
+        P2PPeerToken peer;
+        if (!p2p_parse_token(tok, peer)) {
+            fprintf(stderr, "[Decentralized] That doesn't look like a valid token — "
+                    "check it was copied in full, then try again: %s\n", tok.c_str());
+            CLOSESOCK(cli.udp_fd); return 1;
+        }
+        printf("Got it — will punch through to %s now.\n", peer.id.c_str());
+
+        // Seed the peer directly — this is the one thing that would
+        // normally come from a server's PEER_INFO packet (see
+        // Client::on_peer_info()).
+        Peer p{};
+        p.vpn_ip = peer.vpn_ip;
+        p.node_id = peer.node_id;
+        p.addr.sin_family = AF_INET;
+        p.addr.sin_port = htons(peer.port);
+        inet_pton(AF_INET, peer.ip.c_str(), &p.addr.sin_addr);
+        p.st = P2PSt::PUNCHING;
+        p.t_pstart = now_ms();
+        cli.peers[peer.node_id] = p;
+        cli.vpn_to_node[peer.vpn_ip] = peer.node_id;
+        peer_node_ids.push_back(peer.node_id);
+    }
+    printf("\n[Decentralized] %zu peer(s) configured.\n\n", peer_node_ids.size());
 
     try {
         cli.setup_tun(vpn_ip_str.c_str(), subnet, mtu);
@@ -1936,17 +1967,16 @@ int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str,
     printf("[Decentralized] Encrypt : %s\n\n", enc ? "YES" : "NO");
 
     uint64_t t_status = 0;
-    uint32_t peer_node_id = peer.node_id;
 
     // No relay to lean on here (unlike normal client/server mode), so a
     // peer that gave up after the initial punch timeout should keep
     // auto-retrying rather than wait for a manual force-punch. Called once
     // per loop iteration by both the Linux and Windows loops below.
-    auto retry_and_report = [&cli, &t_status, peer_node_id]() {
+    auto retry_and_report = [&cli, &t_status, &peer_node_ids]() {
         for (auto& [nid, peer_it] : cli.peers) {
             if (peer_it.st == P2PSt::FALLBACK && peer_it.gave_up) {
                 if (now_ms() - peer_it.t_pstart >= 10000) {
-                    printf("[Decentralized] Retrying punch...\n");
+                    printf("[Decentralized] Retrying punch to 0x%08X...\n", nid);
                     peer_it.st = P2PSt::PUNCHING;
                     peer_it.gave_up = false;
                     peer_it.t_pstart = now_ms();
@@ -1959,14 +1989,20 @@ int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str,
         uint64_t now = now_ms();
         if (now - t_status >= 5000) {
             t_status = now;
-            auto it = cli.peers.find(peer_node_id);
-            const char* st = "?";
-            if (it != cli.peers.end()) {
-                st = it->second.direct() ? "DIRECT"
-                   : it->second.st == P2PSt::PUNCHING ? "PUNCHING" : "RETRYING";
+            std::string line = "[Status] ";
+            for (uint32_t nid : peer_node_ids) {
+                auto it = cli.peers.find(nid);
+                const char* st = "?";
+                if (it != cli.peers.end()) {
+                    st = it->second.direct() ? "DIRECT"
+                       : it->second.st == P2PSt::PUNCHING ? "PUNCHING" : "RETRYING";
+                }
+                char buf[48];
+                snprintf(buf, sizeof(buf), "0x%08X:%s  ", nid, st);
+                line += buf;
             }
-            printf("[Status] Peer:%s  TX:%llu  RX:%llu\n", st,
-                   (unsigned long long)cli.tx, (unsigned long long)cli.rx);
+            line += "TX:" + std::to_string(cli.tx) + "  RX:" + std::to_string(cli.rx);
+            printf("%s\n", line.c_str());
         }
     };
 
@@ -2057,10 +2093,12 @@ static void usage(const char* p) {
     printf("  # Client P2P mode:\n");
     printf("  sudo %s --mode client --vpn-ip 10.13.0.3"
            " --server IP:9000 --comm p2p\n\n",p);
-    printf("  # Decentralized — real VPN peer, no server at all, just a token\n");
-    printf("  # you exchange by hand (chat, voice, ...):\n");
+    printf("  # Decentralized — real VPN peer, no server at all, just tokens\n");
+    printf("  # you exchange by hand (chat, voice, ...). Repeat --peer-token\n");
+    printf("  # (or comma-separate) for a mesh of 3+ peers — everyone needs\n");
+    printf("  # everyone else's token, since there's no server to introduce them:\n");
     printf("  sudo %s --mode decentralized --id alice --vpn-ip 10.13.0.2\n"
-           "    [--port 51001] [--peer-token <token>]\n\n",p);
+           "    [--port 51001] [--peer-token <token> [--peer-token <token> ...]]\n\n",p);
     printf("Options:\n");
     printf("  --bind     ip:port  Server bind addr        (default 0.0.0.0:9000)\n");
     printf("  --workers  n        Server worker threads   (default 4)\n");
@@ -2078,7 +2116,9 @@ static void usage(const char* p) {
     printf("  --id         name   (decentralized) your display name in the token\n");
     printf("  --vpn-ip     ip     (decentralized) this node's VPN IP, e.g. 10.13.0.2\n");
     printf("  --port       n      (decentralized) local UDP port          (default 51001)\n");
-    printf("  --peer-token tok    (decentralized) peer's token, skips the paste prompt\n");
+    printf("  --peer-token tok    (decentralized) a peer's token; repeat this flag\n");
+    printf("                      (or comma-separate) for multiple peers — skips\n");
+    printf("                      the interactive paste prompt\n");
 }
 
 int main(int argc, char* argv[]) {
@@ -2095,7 +2135,8 @@ int main(int argc, char* argv[]) {
     uint16_t bind_port=9000, server_port=9000, client_port=51820;
     int subnet=16, mtu=1380, n_workers=4;
     uint32_t node_id=0; bool enc=true, xdp_force_copy=false;
-    std::string p2p_id, peer_token;
+    std::string p2p_id;
+    std::vector<std::string> peer_tokens;
 
     for (int i=1; i<argc; i++) {
         std::string a=argv[i];
@@ -2120,7 +2161,7 @@ int main(int argc, char* argv[]) {
         else if (a=="--mtu"     &&i+1<argc) mtu=atoi(argv[++i]);
         else if (a=="--no-encrypt") enc=false;
         else if (a=="--id"          &&i+1<argc) p2p_id=argv[++i];
-        else if (a=="--peer-token"  &&i+1<argc) peer_token=argv[++i];
+        else if (a=="--peer-token"  &&i+1<argc) peer_tokens.push_back(argv[++i]);
         else if (a=="--help"||a=="-h") { usage(argv[0]); return 0; }
         else { fprintf(stderr,"Unknown: %s\n",a.c_str()); return 1; }
     }
@@ -2133,7 +2174,7 @@ int main(int argc, char* argv[]) {
 #ifndef _WIN32
         signal(SIGPIPE,SIG_IGN);
 #endif
-        return run_decentralized(p2p_id, vpn_ip, subnet, mtu, client_port, enc, peer_token);
+        return run_decentralized(p2p_id, vpn_ip, subnet, mtu, client_port, enc, peer_tokens);
     }
 
     if (mode!="server"&&mode!="client") {

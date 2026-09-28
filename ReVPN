@@ -34,7 +34,7 @@ MODE=""
 
 # Decentralized-mode defaults (no server — direct token exchange)
 DC_ID=""
-DC_PEER_TOKEN=""
+DC_PEER_TOKENS=()
 
 # Stress-test defaults
 ST_CLIENTS=20
@@ -214,14 +214,17 @@ DECENTRALIZED OPTIONS:
   --vpn-ip <ip>        This node's VPN IP, e.g. 10.13.0.2             (required)
   --subnet <n>         VPN network prefix length              (default: ${SUBNET})
   --port <n>           Local UDP port                          (default: 51001)
-  --peer-token <tok>   Peer's token — skips the interactive paste prompt
+  --peer-token <tok>   A peer's token — repeat this flag once per peer
+                       for a mesh of 3+. Skips the interactive paste prompt.
   --encrypt <true|false>  Encrypt tunnel traffic               (default: ${ENCRYPT})
 
   No rendezvous/relay server anywhere — each side asks a public STUN
-  server for its own address, packs it into a short token, and the two
-  of you exchange tokens directly (chat, voice, however). Run it with
-  no --peer-token and it prints your token, then waits for you to
-  paste theirs.
+  server for its own address, packs it into a short token, and everyone
+  in the mesh exchanges tokens directly (chat, voice, however). With
+  no --peer-token, it prints your token, then waits for you to paste
+  one peer's token per line (blank line to finish). Every peer needs
+  every other peer's token — there's no server to introduce them, so
+  mesh size is just how many tokens you hand-exchange.
 
 STRESS-TEST OPTIONS:
   --clients <n>        Simulated clients                       (default: ${ST_CLIENTS})
@@ -244,6 +247,10 @@ EXAMPLES:
   # Two peers connecting directly, no server:
   sudo ReVPN --decentralized --id alice --vpn-ip 10.13.0.2
   sudo ReVPN --decentralized --id bob   --vpn-ip 10.13.0.3
+
+  # A 3-peer mesh — everyone exchanges tokens with everyone:
+  sudo ReVPN --decentralized --id alice --vpn-ip 10.13.0.2 \
+      --peer-token <bob's token> --peer-token <carol's token>
 
 EOF
 }
@@ -316,10 +323,12 @@ launch_decentralized() {
     local args=(--mode decentralized --id "$DC_ID" --vpn-ip "$VPN_IP"
                 --subnet "$SUBNET" --mtu "$MTU")
     [[ "$PORT_SET" == true ]] && args+=(--port "$PORT")
-    [[ -n "$DC_PEER_TOKEN" ]] && args+=(--peer-token "$DC_PEER_TOKEN")
+    for tok in "${DC_PEER_TOKENS[@]}"; do
+        [[ -n "$tok" ]] && args+=(--peer-token "$tok")
+    done
     [[ "$ENCRYPT" == "false" ]] && args+=(--no-encrypt)
 
-    echo "ReVPN: decentralized mode — no server, direct token exchange with your peer"
+    echo "ReVPN: decentralized mode — no server, direct token exchange with your peer(s)"
     save_preset
     exec "$ENGINE_BIN" "${args[@]}"
 }
@@ -469,11 +478,12 @@ tui_decentralized_form() {
   Encrypt   : ${ENCRYPT}
 
 Next: this will drop to a plain screen. It prints a short
-token — send that to your peer any way you like (chat,
-voice, ...) — then asks you to paste the token THEY send
-you back. Both sides then connect directly.
+token — send that to every peer you want in the mesh (chat,
+voice, ...) — then asks you to paste each peer's token back,
+one per line (blank line to finish). Everyone connects directly
+to everyone; a 2-peer link or a larger mesh both work the same way.
 
-Proceed?" 17 62 || return 1
+Proceed?" 19 64 || return 1
     return 0
 }
 
@@ -609,7 +619,7 @@ while [[ $# -gt 0 ]]; do
         --relay-only)  RELAY_ONLY=true; shift ;;
 
         --id)          DC_ID="$2"; shift 2 ;;
-        --peer-token)  DC_PEER_TOKEN="$2"; shift 2 ;;
+        --peer-token)  DC_PEER_TOKENS+=("$2"); shift 2 ;;
 
         --clients)     ST_CLIENTS="$2"; shift 2 ;;
         --duration)    ST_DURATION="$2"; shift 2 ;;

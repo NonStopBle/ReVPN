@@ -226,12 +226,17 @@ yourself?") and fills in `--vpn-ip`/`--subnet` for you if you say yes.
 ## Step 8 — Decentralized mode (no server at all)
 
 Everything above needs one machine running `--server` that both sides
-can reach. Decentralized mode drops that requirement entirely — two
-peers connect **directly**, with nothing in between but a public STUN
+can reach. Decentralized mode drops that requirement entirely — peers
+connect **directly**, with nothing in between but a public STUN
 server (used only to ask "what does the internet see me as?") and a
-short token the two of you exchange by hand — paste it into a chat,
+short token each pair exchanges by hand — paste it into a chat,
 read it over a call, whatever. See the [Abstract](#abstract) for the
 UDP hole punching concept behind this.
+
+This isn't limited to two peers — it's a real mesh. Every peer prints
+its own token and accepts one or more tokens back, so a group of 3+
+just exchanges tokens all-around (everyone needs everyone else's,
+since there's no server to introduce them).
 
 On each side:
 
@@ -247,16 +252,18 @@ Each side prints a token and then waits for the other side's:
 
 ```
 ============================================================
- Step 1 — send this token to your peer (chat, email, voice):
+ Step 1 — send this token to EVERY peer you want to mesh with
+ (chat, email, voice):
 ============================================================
 
   YWxpY2UsNDkuMjM3LjE3NC4xODksOTM3OCwzMzU1Nzc3MCw1MDMwOTk1NzA=
 
 ============================================================
- Step 2 — paste the token THEY send back, below.
+ Step 2 — paste each peer's token below, one per line.
+ Leave a line blank when you're done adding peers.
 ============================================================
 
-Peer's token:
+Peer's token (blank to finish):
 ```
 
 Send Alice's token to Bob (and Bob's back to Alice) any way you like —
@@ -266,6 +273,10 @@ device comes up on each side (`10.13.0.2` and `10.13.0.3` here) —
 `ping`, SSH, anything, same as `--client`/`--server`, just with no
 server in the picture at any point.
 
+For a group of 3+, everybody pastes in one line per peer (Alice
+pastes Bob's and Carol's tokens, Bob pastes Alice's and Carol's, and
+so on), then hits blank/enter to start punching to all of them.
+
 No arguments? The TUI has a **Decentralized** entry on the main menu
 that asks for your name and VPN IP, then walks you through the same
 token exchange on a plain screen.
@@ -274,8 +285,9 @@ token exchange on a plain screen.
 --vpn-ip     ip     This node's VPN IP, e.g. 10.13.0.2       (required)
 --id         name   Your display name, shown in the token    (required)
 --port       n      Local UDP port                            (default: 51001)
---peer-token <tok>  Paste the peer's token as a flag instead of
-                     being prompted for it (useful for scripting)
+--peer-token <tok>  A peer's token, as a flag instead of being prompted
+                     for it. Repeat the flag (or comma-separate) for a
+                     mesh of 3+ peers.
 --encrypt <true|false>  Encrypt tunnel traffic               (default: true)
 ```
 
