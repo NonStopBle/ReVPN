@@ -1,4 +1,4 @@
-<div align="center">
+<img width="1102" height="785" alt="ReVPN-Decentralized" src="https://github.com/user-attachments/assets/52d5a24f-e93d-4d16-9c3a-2287e54025bd" /><div align="center">
 
 # ReVPN
 
@@ -241,7 +241,7 @@ yourself?") and fills in `--vpn-ip`/`--subnet` for you if you say yes.
 ## Step 8 — Decentralized mode (no server at all)
 
 <p align="center">
-  <img width="842" height="614" alt="mesh_decent" src="https://github.com/user-attachments/assets/be106294-e9fd-4bb8-9c13-27a48f84b389" />
+<img width="2204" height="1570" alt="ReVPN-Decentralized" src="https://github.com/user-attachments/assets/1fc5d106-9810-48f6-8d60-c916d044bee7" />
 </p>
 
 Everything above needs one machine running `--server` that both sides
@@ -256,6 +256,10 @@ This isn't limited to two peers — it's a real mesh. Every peer prints
 its own token and accepts one or more tokens back, so a group of 3+
 just exchanges tokens all-around (everyone needs everyone else's,
 since there's no server to introduce them).
+
+<p align="center">
+  <img width="842" height="614" alt="mesh_decent" src="https://github.com/user-attachments/assets/be106294-e9fd-4bb8-9c13-27a48f84b389" />
+</p>
 
 On each side:
 
