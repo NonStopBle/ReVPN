@@ -354,8 +354,9 @@ packet loss) so you can sanity-check a server before depending on it.
 
 ## The TUI
 
-<img width="889" height="656" alt="tui_ui" src="https://github.com/user-attachments/assets/9b6e4a38-4674-4c99-a2ae-6015085b1e22" />
-
+<p align="center">
+  <img width="889" height="656" alt="tui_ui" src="https://github.com/user-attachments/assets/9b6e4a38-4674-4c99-a2ae-6015085b1e22" />
+</p>
 
 Running `ReVPN` with no arguments opens a full-screen menu (`whiptail`,
 falling back to `dialog`, falling back to plain `--help` text if
