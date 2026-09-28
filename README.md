@@ -145,7 +145,7 @@ This builds `build/ReVPN-engine`, the program the `ReVPN` command drives.
 <p align="center">
   <img width="885" height="645" alt="mesh_server" src="https://github.com/user-attachments/assets/9a2cb110-ef67-47d9-b716-75a9c0e300a0" />
 </p>
-
+![Uploading ReVPN-Decentralized.svg…]()
 Pick one computer with a public/reachable IP to be the server everyone
 else connects through:
 
@@ -241,7 +241,7 @@ yourself?") and fills in `--vpn-ip`/`--subnet` for you if you say yes.
 ## Step 8 — Decentralized mode (no server at all)
 
 <p align="center">
-<img width="2204" height="1570" alt="ReVPN-Decentralized" src="https://github.com/user-attachments/assets/1fc5d106-9810-48f6-8d60-c916d044bee7" />
+<img width="1102" height="785" alt="ReVPN-Decentralized" src="https://github.com/user-attachments/assets/dabe9fed-e54c-4896-b633-9ddef6f24517" />
 </p>
 
 Everything above needs one machine running `--server` that both sides
