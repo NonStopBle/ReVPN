@@ -1,0 +1,631 @@
+#!/usr/bin/env bash
+# ============================================================================
+# ReVPN — Hamachi-style CLI + nmtui-style TUI for the mesh VPN engine
+#         (TUN + UDP hole punch + auto relay fallback + XDP zero-copy).
+#
+# The heavy lifting (TUN device, UDP hole punching, relay fallback, XDP)
+# is all done by the compiled `ReVPN-engine` binary (built from meshvpn.cpp
+# under engine/). This script is a friendly CLI in front of it, and — when
+# run with no arguments at all — a full-screen interactive TUI, the same
+# way `nmtui` is the no-argument counterpart to `nmcli`.
+# ============================================================================
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENGINE_BIN="$SELF_DIR/build/ReVPN-engine"
+STRESS_BIN="$SELF_DIR/tools/stress_client.py"
+
+VERSION="1.0.0"
+
+# ── Defaults (Hamachi-like: sane out of the box) ───────────────────────────
+PORT=9000            # server bind port / client local udp port base
+PORT_SET=false
+WORKERS=4            # server worker threads
+VPN_IP=""
+CONNECT=""           # server address to join, ip:port
+SUBNET=16
+MTU=1380
+NODE_ID=""
+ENCRYPT=true
+XDP_IFACE=""
+XDP_COPY=false
+RELAY_ONLY=false
+MODE=""
+
+# Decentralized-mode defaults (no server — direct token exchange)
+DC_ID=""
+DC_PEER_TOKEN=""
+
+# Stress-test defaults
+ST_CLIENTS=20
+ST_DURATION=10
+ST_RATE=500
+ST_SIZE=512
+ST_PORT=19099
+
+fail() { echo "ReVPN: $*" >&2; exit 1; }
+
+# ============================================================================
+# Preset — last-used settings, saved after every successful launch and
+# reloaded as the new defaults next time (server/client/stress separately,
+# so switching modes doesn't clobber each other's fields). `ReVPN --reset`
+# deletes it and falls back to the hardcoded defaults above.
+# ============================================================================
+# ReVPN needs root for --server/--client (TUN device, raw sockets), but the
+# preset must stay tied to the real person running it, not to /root — sudo
+# resets $HOME to /root, so without this a `sudo ./ReVPN --client ...` run
+# would silently save to /root/.config/ReVPN/ where a later plain
+# `./ReVPN` (as the normal user) would never find it.
+resolve_real_home() {
+    if [[ "$(id -u)" -eq 0 && -n "${SUDO_USER:-}" ]]; then
+        local h
+        h="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)"
+        if [[ -n "$h" ]]; then echo "$h"; return; fi
+    fi
+    echo "$HOME"
+}
+REAL_HOME="$(resolve_real_home)"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$REAL_HOME/.config}/ReVPN"
+CONFIG_FILE="$CONFIG_DIR/preset.conf"
+
+load_preset() {
+    # shellcheck disable=SC1090
+    [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
+    return 0
+}
+
+save_preset() {
+    mkdir -p "$CONFIG_DIR"
+    cat > "$CONFIG_FILE" <<EOF
+# ReVPN saved preset — last settings used, reloaded automatically.
+# Delete this file, or run: ReVPN --reset
+PORT=${PORT}
+PORT_SET=${PORT_SET}
+WORKERS=${WORKERS}
+XDP_IFACE="${XDP_IFACE}"
+XDP_COPY=${XDP_COPY}
+VPN_IP="${VPN_IP}"
+CONNECT="${CONNECT}"
+SUBNET=${SUBNET}
+MTU=${MTU}
+NODE_ID="${NODE_ID}"
+ENCRYPT=${ENCRYPT}
+RELAY_ONLY=${RELAY_ONLY}
+ST_CLIENTS=${ST_CLIENTS}
+ST_DURATION=${ST_DURATION}
+ST_RATE=${ST_RATE}
+ST_SIZE=${ST_SIZE}
+ST_PORT=${ST_PORT}
+DC_ID="${DC_ID}"
+EOF
+    # Hand ownership back to the real user when we're running under sudo,
+    # so their own later non-sudo `./ReVPN` can read AND rewrite it.
+    if [[ "$(id -u)" -eq 0 && -n "${SUDO_UID:-}" && -n "${SUDO_GID:-}" ]]; then
+        chown -R "${SUDO_UID}:${SUDO_GID}" "$CONFIG_DIR" 2>/dev/null || true
+    fi
+}
+
+# ============================================================================
+# --config <file> — flat "key: value" YAML, one file for --server settings
+# (config/server.yaml) and one for --client settings (config/client.yaml).
+# Only simple scalars are supported (no nesting/lists) — that's all these
+# settings need. Values here override the saved preset but are themselves
+# overridden by any matching flag also given on the command line.
+# ============================================================================
+load_yaml_config() {
+    local f="$1"
+    [[ -f "$f" ]] || fail "config file not found: $f"
+
+    local line key val
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%%#*}"                               # strip comments
+        line="$(sed 's/^[[:space:]]*//;s/[[:space:]]*$//' <<<"$line")"
+        [[ -z "$line" ]] && continue
+        [[ "$line" != *:* ]] && continue
+
+        key="${line%%:*}"
+        val="${line#*:}"
+        key="$(sed 's/[[:space:]]*$//' <<<"$key")"
+        val="$(sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//' <<<"$val")"
+
+        case "$key" in
+            port)          [[ -n "$val" ]] && { PORT="$val"; PORT_SET=true; } ;;
+            workers)       WORKERS="$val" ;;
+            xdp_iface)     XDP_IFACE="$val" ;;
+            xdp_copy)      XDP_COPY="$val" ;;
+            connect)       CONNECT="$val" ;;
+            vpn_ip)        VPN_IP="$val" ;;
+            subnet)        SUBNET="$val" ;;
+            node_id)       NODE_ID="$val" ;;
+            mtu)           MTU="$val" ;;
+            encrypt)       ENCRYPT="$val" ;;
+            relay_only)    RELAY_ONLY="$val" ;;
+            clients)       ST_CLIENTS="$val" ;;
+            duration)      ST_DURATION="$val" ;;
+            rate)          ST_RATE="$val" ;;
+            size)          ST_SIZE="$val" ;;
+            stress_port)   ST_PORT="$val" ;;
+            *) ;; # ignore unknown keys
+        esac
+    done < "$f"
+}
+
+# ============================================================================
+# Help — modeled after `hamachi --help` style: short, verb-first, obvious.
+# ============================================================================
+usage() {
+cat <<EOF
+ReVPN ${VERSION} — simple mesh VPN (TUN device, UDP hole punching, auto relay)
+Creative By Rezier Labs
+
+USAGE:
+  ReVPN                                Launch the interactive TUI (like nmtui)
+  ReVPN --server  [options]           Start this machine as the relay/rendezvous server
+  ReVPN --client  [options]           Join a ReVPN server as a client (creates tun0)
+  ReVPN --decentralized [options]     Join a peer directly, no server — just a token
+  ReVPN --stress  [options]           Load-test the relay server (no root/TUN needed)
+  ReVPN --help, -h                    Show this help
+  ReVPN --version                     Show version
+  ReVPN --reset                        Clear saved preset, then open the TUI
+  ReVPN --server --config <file>      Load server settings from a YAML file
+  ReVPN --client --config <file>      Load client settings from a YAML file
+
+Last-used settings are saved automatically after every launch (to
+~/.config/ReVPN/preset.conf) and reloaded as the defaults next time you
+run ReVPN, whether via the TUI or plain flags. Run with --reset to wipe
+them and start fresh.
+
+--config loads simple "key: value" settings from a YAML file — see
+config/server.yaml and config/client.yaml for the full field list and
+comments. Precedence, lowest to highest: hardcoded defaults → saved
+preset → --config file → any flag also given on the command line.
+
+  ./ReVPN --server --config ./config/server.yaml
+  ./ReVPN --client --config ./config/client.yml
+
+SERVER OPTIONS:
+  --port <n>          UDP port to listen on                 (default: ${PORT})
+  --workers <n>        Number of worker threads              (default: ${WORKERS})
+  --vpn-ip <ip>       Also join the mesh as a peer, reachable
+                       at this VPN IP (default: pure bridge, no TUN)
+  --subnet <n>         VPN network prefix length, with --vpn-ip (default: ${SUBNET})
+  --xdp-iface <if>    Enable AF_XDP zero-copy on interface   (e.g. eth0)
+                       Only works if built with: ./build.sh --xdp
+  --xdp-copy          Force XDP copy-mode (compat, slower)
+
+CLIENT OPTIONS:
+  --connect <ip:port>  Address of the ReVPN server to join    (required)
+  --vpn-ip <ip>        This node's VPN IP, e.g. 10.13.0.2      (required)
+  --subnet <n>         VPN network prefix length              (default: ${SUBNET})
+  --port <n>           Local UDP port                          (default: 51820)
+  --node-id <hex>      Fixed 32-bit node id (default: derived from --vpn-ip)
+  --mtu <n>            TUN interface MTU                       (default: ${MTU})
+  --encrypt <true|false>  Encrypt tunnel traffic               (default: ${ENCRYPT})
+  --relay-only         Never attempt direct UDP hole punching,
+                       always relay through the server
+
+  By default ReVPN ALWAYS tries direct UDP hole punching first between
+  clients. If a direct path can't be established (symmetric NAT, firewall,
+  etc.) it automatically falls back to relaying traffic through the server
+  — no flag needed. Use --relay-only to skip punching entirely.
+
+DECENTRALIZED OPTIONS:
+  --id <name>          Your display name in the token                (required)
+  --vpn-ip <ip>        This node's VPN IP, e.g. 10.13.0.2             (required)
+  --subnet <n>         VPN network prefix length              (default: ${SUBNET})
+  --port <n>           Local UDP port                          (default: 51001)
+  --peer-token <tok>   Peer's token — skips the interactive paste prompt
+  --encrypt <true|false>  Encrypt tunnel traffic               (default: ${ENCRYPT})
+
+  No rendezvous/relay server anywhere — each side asks a public STUN
+  server for its own address, packs it into a short token, and the two
+  of you exchange tokens directly (chat, voice, however). Run it with
+  no --peer-token and it prints your token, then waits for you to
+  paste theirs.
+
+STRESS-TEST OPTIONS:
+  --clients <n>        Simulated clients                       (default: ${ST_CLIENTS})
+  --duration <s>        Test length in seconds                 (default: ${ST_DURATION})
+  --rate <pps>          Packets/sec, per simulated client       (default: ${ST_RATE})
+  --size <bytes>        Payload size per packet                 (default: ${ST_SIZE})
+  --stress-port <n>     Port the throwaway test server binds to (default: ${ST_PORT})
+
+EXAMPLES:
+  # On the rendezvous machine (needs a public/reachable IP):
+  sudo ReVPN --server --port 9000
+
+  # On each peer that wants to join the mesh:
+  sudo ReVPN --client --connect 203.0.113.10:9000 --vpn-ip 10.13.0.2
+  sudo ReVPN --client --connect 203.0.113.10:9000 --vpn-ip 10.13.0.3 --encrypt false
+
+  # Load-test the server engine itself:
+  ReVPN --stress --clients 200 --duration 30 --rate 1000
+
+  # Two peers connecting directly, no server:
+  sudo ReVPN --decentralized --id alice --vpn-ip 10.13.0.2
+  sudo ReVPN --decentralized --id bob   --vpn-ip 10.13.0.3
+
+EOF
+}
+
+require_engine() {
+    [[ -x "$ENGINE_BIN" ]] || fail "engine binary not built yet — run: $SELF_DIR/build.sh"
+}
+
+# ============================================================================
+# Launchers — shared by both the flag-based CLI and the TUI below.
+# ============================================================================
+launch_server() {
+    require_engine
+    local args=(--mode server --bind "0.0.0.0:${PORT}" --workers "${WORKERS}")
+    [[ -n "$XDP_IFACE" ]] && args+=(--xdp-iface "$XDP_IFACE")
+    [[ "$XDP_COPY" == true ]] && args+=(--xdp-copy)
+    [[ -n "$VPN_IP" ]] && args+=(--vpn-ip "$VPN_IP" --subnet "$SUBNET" --mtu "$MTU")
+
+    if [[ -n "$VPN_IP" ]]; then
+        echo "ReVPN: starting server on 0.0.0.0:${PORT} (${WORKERS} workers), joining mesh as ${VPN_IP}/${SUBNET}"
+    else
+        echo "ReVPN: starting server on 0.0.0.0:${PORT} (${WORKERS} workers)"
+    fi
+    save_preset
+    exec "$ENGINE_BIN" "${args[@]}"
+}
+
+launch_client() {
+    require_engine
+    [[ -n "$VPN_IP" ]]  || fail "--client requires --vpn-ip <ip>"
+    [[ -n "$CONNECT" ]] || fail "--client requires --connect <ip:port>"
+    case "$ENCRYPT" in
+        true|false) ;;
+        *) fail "--encrypt must be 'true' or 'false' (got: $ENCRYPT)" ;;
+    esac
+
+    local comm="p2p"
+    [[ "$RELAY_ONLY" == true ]] && comm="relay"
+
+    local args=(--mode client --vpn-ip "$VPN_IP" --server "$CONNECT" --comm "$comm"
+                --subnet "$SUBNET" --mtu "$MTU")
+    [[ -n "$NODE_ID" ]] && args+=(--node-id "$NODE_ID")
+    [[ "$PORT_SET" == true ]] && args+=(--port "$PORT")
+    [[ "$ENCRYPT" == "false" ]] && args+=(--no-encrypt)
+
+    echo "ReVPN: joining ${CONNECT} as ${VPN_IP}/${SUBNET}  (mode=${comm}, encrypt=${ENCRYPT})"
+    [[ "$comm" == "p2p" ]] && echo "ReVPN: will try direct UDP hole punching, auto-relay on failure"
+    save_preset
+    exec "$ENGINE_BIN" "${args[@]}"
+}
+
+launch_stress() {
+    require_engine
+    command -v python3 >/dev/null 2>&1 || fail "--stress needs python3"
+    save_preset
+    exec "$SELF_DIR/stress_test.sh" \
+        --port "$ST_PORT" --clients "$ST_CLIENTS" \
+        --duration "$ST_DURATION" --rate "$ST_RATE" --size "$ST_SIZE"
+}
+
+launch_decentralized() {
+    require_engine
+    [[ -n "$VPN_IP" ]] || fail "--decentralized requires --vpn-ip <ip>"
+    [[ -n "$DC_ID" ]]  || fail "--decentralized requires --id <name>"
+    case "$ENCRYPT" in
+        true|false) ;;
+        *) fail "--encrypt must be 'true' or 'false' (got: $ENCRYPT)" ;;
+    esac
+
+    local args=(--mode decentralized --id "$DC_ID" --vpn-ip "$VPN_IP"
+                --subnet "$SUBNET" --mtu "$MTU")
+    [[ "$PORT_SET" == true ]] && args+=(--port "$PORT")
+    [[ -n "$DC_PEER_TOKEN" ]] && args+=(--peer-token "$DC_PEER_TOKEN")
+    [[ "$ENCRYPT" == "false" ]] && args+=(--no-encrypt)
+
+    echo "ReVPN: decentralized mode — no server, direct token exchange with your peer"
+    save_preset
+    exec "$ENGINE_BIN" "${args[@]}"
+}
+
+# ============================================================================
+# TUI — nmtui-style full-screen menu, shown automatically when ReVPN is run
+# with NO arguments at all. Uses whiptail (or dialog as a fallback); both
+# are the same libnewt-family tool nmtui itself is built on.
+# ============================================================================
+TUI_TOOL=""
+pick_tui_tool() {
+    if command -v whiptail >/dev/null 2>&1; then TUI_TOOL="whiptail"
+    elif command -v dialog >/dev/null 2>&1;   then TUI_TOOL="dialog"
+    else TUI_TOOL=""
+    fi
+}
+
+# box <height> <width> -- <mode-specific-args...>
+box() { "$TUI_TOOL" --backtitle "ReVPN ${VERSION} — Mesh VPN — Creative By Rezier Labs" "$@" 3>&1 1>&2 2>&3; }
+
+tui_input() { # title text default height width
+    box --title "$1" --inputbox "$2" "$4" "$5" "$3"
+}
+
+tui_yesno() { # title text [height] [width] -> 0=yes 1=no
+    "$TUI_TOOL" --backtitle "ReVPN ${VERSION} — Mesh VPN — Creative By Rezier Labs" \
+        --title "$1" --yesno "$2" "${3:-10}" "${4:-60}"
+}
+
+tui_msg() {
+    "$TUI_TOOL" --backtitle "ReVPN ${VERSION} — Mesh VPN — Creative By Rezier Labs" \
+        --title "$1" --msgbox "$2" 16 70
+}
+
+xdp_supported() { [[ -f "$SELF_DIR/build/.xdp_enabled" ]]; }
+
+# Real network interfaces on this machine (excludes loopback), for the
+# AF_XDP picker below — never free-typed, always chosen from what exists.
+list_interfaces() {
+    ip -o link show 2>/dev/null \
+        | awk -F': ' '{print $2}' \
+        | sed 's/@.*//' \
+        | grep -v '^lo$' \
+        || true
+}
+
+tui_pick_xdp_iface() {
+    local ifaces=()
+    while IFS= read -r ifn; do
+        [[ -n "$ifn" ]] && ifaces+=("$ifn" "Enable AF_XDP zero-copy on $ifn")
+    done < <(list_interfaces)
+
+    if [[ ${#ifaces[@]} -eq 0 ]]; then
+        tui_msg "AF_XDP" "No network interfaces were found to pick from.\n\nContinuing without AF_XDP (recvmmsg)."
+        XDP_IFACE=""
+        return 0
+    fi
+
+    local choice
+    choice="$(box --title "Server: AF_XDP Interface" --menu \
+        "Pick a NIC for zero-copy AF_XDP, or None to use recvmmsg:" \
+        $(( ${#ifaces[@]} / 2 + 9 )) 64 $(( ${#ifaces[@]} / 2 + 1 )) \
+        None "Disable AF_XDP (use recvmmsg)" \
+        "${ifaces[@]}")" || return 1
+
+    [[ "$choice" == "None" ]] && XDP_IFACE="" || XDP_IFACE="$choice"
+    return 0
+}
+
+tui_server_form() {
+    PORT="$(tui_input "Server: UDP Port"     "Port to listen on"        "$PORT"    10 60)"    || return 1
+    WORKERS="$(tui_input "Server: Workers"    "Worker threads"           "$WORKERS" 10 60)"    || return 1
+
+    if xdp_supported; then
+        tui_pick_xdp_iface || return 1
+    else
+        XDP_IFACE=""
+    fi
+    PORT_SET=true
+
+    if tui_yesno "Server as peer" \
+"Also join the mesh yourself, so clients can reach
+this server machine at its own VPN IP (not just
+relay/rendezvous for each other)?
+
+(Linux only — needs root, same as a client's TUN.)"; then
+        VPN_IP="$(tui_input "Server: VPN IP" "This server's VPN IP, e.g. 10.13.0.1" "${VPN_IP:-10.13.0.1}" 10 60)" || return 1
+        SUBNET="$(tui_input "Server: Subnet Prefix" "VPN network prefix length" "$SUBNET" 10 60)" || return 1
+    else
+        VPN_IP=""
+    fi
+
+    tui_yesno "Confirm" \
+"Start Server (relay / rendezvous):
+
+  Port     : ${PORT}
+  Workers  : ${WORKERS}
+  XDP Iface: ${XDP_IFACE:-None}
+  VPN IP   : $([[ -n "$VPN_IP" ]] && echo "${VPN_IP}/${SUBNET}  (server joins as a peer)" || echo "None (pure bridge)")
+
+Proceed?" 13 60 || return 1
+    return 0
+}
+
+tui_client_form() {
+    CONNECT="$(tui_input "Client: Server Address" "Address of the server to join, ip:port" "$CONNECT" 10 60)" || return 1
+    VPN_IP="$(tui_input  "Client: VPN IP"          "This node's VPN IP, e.g. 10.13.0.2" "${VPN_IP:-10.13.0.2}" 10 60)" || return 1
+    SUBNET="$(tui_input  "Client: Subnet Prefix"   "VPN network prefix length" "$SUBNET" 10 60)" || return 1
+
+    if tui_yesno "Encryption" "Encrypt tunnel traffic?"; then ENCRYPT=true; else ENCRYPT=false; fi
+
+    if tui_yesno "Hole Punching" \
+"Try direct UDP hole punching between peers first,
+And automatically fall back to relaying through
+The server if punching fails?
+
+(Choose 'No' to force relay-only.)"; then
+        RELAY_ONLY=false
+    else
+        RELAY_ONLY=true
+    fi
+
+    tui_yesno "Confirm" \
+"Join as Client:
+
+  Server   : ${CONNECT}
+  VPN IP   : ${VPN_IP}/${SUBNET}
+  Encrypt  : ${ENCRYPT}
+  Mode     : $([[ "$RELAY_ONLY" == true ]] && echo "Relay-only" || echo "P2P + auto relay fallback")
+
+Proceed?" || return 1
+    return 0
+}
+
+tui_decentralized_form() {
+    DC_ID="$(tui_input "Decentralized: Your Name" "Your display name, shown in the token" "${DC_ID:-me}" 10 60)" || return 1
+    VPN_IP="$(tui_input "Decentralized: VPN IP" "This node's VPN IP, e.g. 10.13.0.2" "${VPN_IP:-10.13.0.2}" 10 60)" || return 1
+    SUBNET="$(tui_input "Decentralized: Subnet Prefix" "VPN network prefix length" "$SUBNET" 10 60)" || return 1
+
+    if tui_yesno "Encryption" "Encrypt tunnel traffic?"; then ENCRYPT=true; else ENCRYPT=false; fi
+
+    tui_yesno "Confirm" \
+"Connect directly to a peer — no server:
+
+  Your name : ${DC_ID}
+  VPN IP    : ${VPN_IP}/${SUBNET}
+  Encrypt   : ${ENCRYPT}
+
+Next: this will drop to a plain screen. It prints a short
+token — send that to your peer any way you like (chat,
+voice, ...) — then asks you to paste the token THEY send
+you back. Both sides then connect directly.
+
+Proceed?" 17 62 || return 1
+    return 0
+}
+
+tui_stress_form() {
+    ST_CLIENTS="$(tui_input  "Stress Test: Clients"  "Simulated clients"     "$ST_CLIENTS"  10 60)" || return 1
+    ST_DURATION="$(tui_input "Stress Test: Duration" "Test length, seconds"  "$ST_DURATION" 10 60)" || return 1
+    ST_RATE="$(tui_input     "Stress Test: Rate"     "Packets/sec per client" "$ST_RATE"    10 60)" || return 1
+    ST_SIZE="$(tui_input     "Stress Test: Size"     "Payload bytes/packet"   "$ST_SIZE"    10 60)" || return 1
+
+    tui_yesno "Confirm" \
+"Run Relay-Server Stress Test:
+
+  Clients : ${ST_CLIENTS}
+  Duration: ${ST_DURATION}s
+  Rate    : ${ST_RATE} pps/client
+  Size    : ${ST_SIZE} bytes
+
+No root or TUN device needed. Proceed?" || return 1
+    return 0
+}
+
+tui_main() {
+    pick_tui_tool
+    if [[ -z "$TUI_TOOL" ]]; then
+        echo "ReVPN: No arguments given, and no TUI tool found." >&2
+        echo "       Install one to get the interactive menu:" >&2
+        echo "         sudo apt install whiptail   # or: sudo apt install dialog" >&2
+        echo >&2
+        usage
+        exit 1
+    fi
+
+    while true; do
+        CHOICE="$(box --title "ReVPN — Main Menu" --menu \
+            "No arguments given — pick what to do (like nmtui):" 18 70 6 \
+            Server        "Start this machine as the relay/rendezvous server" \
+            Client        "Join a ReVPN server as a client"                  \
+            Decentralized "Connect directly to a peer — no server, just a token" \
+            Stress        "Stress-test the relay server (no root needed)"    \
+            Help          "Show full --help text"                            \
+            Quit          "Exit"                                             \
+        )" || exit 0
+
+        case "$CHOICE" in
+            Server)
+                if [[ ! -x "$ENGINE_BIN" ]]; then
+                    tui_msg "Not Built" "Engine binary missing.\n\nRun ./build.sh first, then re-run ReVPN."
+                    continue
+                fi
+                tui_server_form && { clear; MODE=server; launch_server; }
+                ;;
+            Client)
+                if [[ ! -x "$ENGINE_BIN" ]]; then
+                    tui_msg "Not Built" "Engine binary missing.\n\nRun ./build.sh first, then re-run ReVPN."
+                    continue
+                fi
+                tui_client_form && { clear; MODE=client; launch_client; }
+                ;;
+            Decentralized)
+                if [[ ! -x "$ENGINE_BIN" ]]; then
+                    tui_msg "Not Built" "Engine binary missing.\n\nRun ./build.sh first, then re-run ReVPN."
+                    continue
+                fi
+                tui_decentralized_form && { clear; MODE=decentralized; launch_decentralized; }
+                ;;
+            Stress)
+                tui_stress_form && { clear; launch_stress; }
+                ;;
+            Help)
+                tui_msg "ReVPN --help" "$(usage)"
+                ;;
+            Quit|"") exit 0 ;;
+        esac
+    done
+}
+
+# ============================================================================
+# Entry point
+# ============================================================================
+
+# --reset and --config are pulled out of the argument list first, wherever
+# they appear, so the remaining flags (parsed below) still get the final
+# say over anything a --config file sets.
+RESET=false
+CONFIG_ARG=""
+_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --reset)  RESET=true; shift ;;
+        --config) CONFIG_ARG="$2"; shift 2 ;;
+        *) _ARGS+=("$1"); shift ;;
+    esac
+done
+set -- "${_ARGS[@]}"
+
+if [[ "$RESET" == true ]]; then
+    rm -f "$CONFIG_FILE"
+    echo "ReVPN: saved preset cleared — using defaults"
+else
+    load_preset
+fi
+
+if [[ -n "$CONFIG_ARG" ]]; then
+    load_yaml_config "$CONFIG_ARG"
+    echo "ReVPN: loaded config $CONFIG_ARG"
+fi
+
+if [[ $# -eq 0 ]]; then
+    tui_main
+    exit 0
+fi
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --server) MODE="server"; shift ;;
+        --client) MODE="client"; shift ;;
+        --decentralized) MODE="decentralized"; shift ;;
+        --stress) MODE="stress"; shift ;;
+        --help|-h) usage; exit 0 ;;
+        --version) echo "ReVPN ${VERSION}"; exit 0 ;;
+
+        --port)        PORT="$2"; PORT_SET=true; shift 2 ;;
+        --workers)     WORKERS="$2"; shift 2 ;;
+        --xdp-iface)   XDP_IFACE="$2"; shift 2 ;;
+        --xdp-copy)    XDP_COPY=true; shift ;;
+
+        --connect)     CONNECT="$2"; shift 2 ;;
+        --vpn-ip)      VPN_IP="$2"; shift 2 ;;
+        --subnet)      SUBNET="$2"; shift 2 ;;
+        --node-id)     NODE_ID="$2"; shift 2 ;;
+        --mtu)         MTU="$2"; shift 2 ;;
+        --encrypt)     ENCRYPT="$2"; shift 2 ;;
+        --relay-only)  RELAY_ONLY=true; shift ;;
+
+        --id)          DC_ID="$2"; shift 2 ;;
+        --peer-token)  DC_PEER_TOKEN="$2"; shift 2 ;;
+
+        --clients)     ST_CLIENTS="$2"; shift 2 ;;
+        --duration)    ST_DURATION="$2"; shift 2 ;;
+        --rate)        ST_RATE="$2"; shift 2 ;;
+        --size)        ST_SIZE="$2"; shift 2 ;;
+        --stress-port) ST_PORT="$2"; shift 2 ;;
+
+        *) fail "unknown option '$1' (see: ReVPN --help)" ;;
+    esac
+done
+
+[[ -z "$MODE" ]] && { usage; fail "one of --server, --client, --decentralized or --stress is required"; }
+
+case "$MODE" in
+    server)        launch_server ;;
+    client)        launch_client ;;
+    decentralized) launch_decentralized ;;
+    stress)        launch_stress ;;
+esac

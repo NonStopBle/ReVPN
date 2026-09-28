@@ -1,0 +1,21 @@
+# Build outputs (regenerate with build.sh / build_windows.sh / build_windows_exe.sh)
+/build/
+python/build/
+python/dist/
+python/*.egg-info/
+
+# Python
+__pycache__/
+*.pyc
+
+# Wine prefixes used for cross-build/testing (never commit these)
+.wine*/
+
+TestVPN.zip
+
+# draw.io editor artifacts (backup/temp files the desktop app and VS Code
+# extension create next to a .drawio file — never the diagram itself)
+*.drawio.bkp
+*.drawio.dtmp
+*.dtmp
+.$*.drawio

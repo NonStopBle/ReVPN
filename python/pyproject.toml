@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ReVPN"
+version = "1.0.0"
+description = "Cross-platform mesh VPN CLI/TUI (hole-punch + auto relay fallback), wire-compatible with the ReVPN-cpp engine"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "PolyForm-Noncommercial-1.0.0" }
+dependencies = [
+    "windows-curses; sys_platform == 'win32'",
+]
+
+[project.scripts]
+ReVPN = "ReVPN.cli:main"
+
+[tool.setuptools]
+packages = ["ReVPN"]
