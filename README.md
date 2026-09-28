@@ -127,6 +127,10 @@ and it remembers what you entered for next time.
 <img width="966" height="664" alt="meshbuild" src="https://github.com/user-attachments/assets/0782dd56-9c21-455f-a07e-4c9f709b1469" />
 </p>
 
+<p align="center">
+  <img width="842" height="614" alt="revpn_help" src="https://github.com/user-attachments/assets/009af72e-4eb7-4ce5-8390-bfd9d3ca128f" />
+</p>
+
 
 ```sh
 cd ReVPN
