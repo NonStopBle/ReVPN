@@ -138,6 +138,9 @@ This builds `build/ReVPN-engine`, the program the `ReVPN` command drives.
 ---
 
 ## Step 2 — Start the server
+<p align="center">
+  <img width="885" height="645" alt="mesh_server" src="https://github.com/user-attachments/assets/9a2cb110-ef67-47d9-b716-75a9c0e300a0" />
+</p>
 
 Pick one computer with a public/reachable IP to be the server everyone
 else connects through:
