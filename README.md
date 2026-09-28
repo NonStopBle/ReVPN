@@ -35,6 +35,9 @@ configured port forwarding on my own router, and never opened a
 single port? I spent a long time researching that question before the
 answer clicked: **UDP hole punching**.
 
+<img width="1091" height="675" alt="ReVPN-basic-communication" src="https://github.com/user-attachments/assets/613f9f6a-fa1f-43f4-aabf-d0b81a14883d" />
+
+
 In short, most home routers use NAT (Network Address Translation) to
 share one public IP across every device behind them, and by default
 they silently drop unsolicited inbound traffic — which is exactly why
