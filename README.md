@@ -1,7 +1,5 @@
-# ReVPN
-
 <div align="center">
-
+  
 # ReVPN
 
 **ReVPN: TUN-based mesh networking with UDP hole punching, automatic
@@ -80,6 +78,7 @@ sides punched through on the first attempt.
 
 ## Quickstart
 
+
 ```sh
 cd ReVPN
 ./build.sh                                        # build the engine once
@@ -124,6 +123,15 @@ and it remembers what you entered for next time.
 
 ## Step 1 — Build it (Linux)
 
+<p align="center">
+<img width="966" height="664" alt="meshbuild" src="https://github.com/user-attachments/assets/0782dd56-9c21-455f-a07e-4c9f709b1469" />
+</p>
+
+<p align="center">
+  <img width="842" height="614" alt="revpn_help" src="https://github.com/user-attachments/assets/009af72e-4eb7-4ce5-8390-bfd9d3ca128f" />
+</p>
+
+
 ```sh
 cd ReVPN
 ./build.sh
@@ -134,7 +142,9 @@ This builds `build/ReVPN-engine`, the program the `ReVPN` command drives.
 ---
 
 ## Step 2 — Start the server
-
+<p align="center">
+  <img width="885" height="645" alt="mesh_server" src="https://github.com/user-attachments/assets/9a2cb110-ef67-47d9-b716-75a9c0e300a0" />
+</p>
 Pick one computer with a public/reachable IP to be the server everyone
 else connects through:
 
@@ -152,6 +162,10 @@ want the server machine reachable on the mesh too).
 ## Step 3 — Connect a client
 
 On every other computer you want on the network:
+
+<p align="center">
+  <img width="842" height="614" alt="image_clients" src="https://github.com/user-attachments/assets/88536864-5776-48d0-9bf4-e1220d5e848a" />
+</p>
 
 ```sh
 sudo ./ReVPN --client --connect <server-ip>:9000 --vpn-ip 10.13.0.2
@@ -225,6 +239,10 @@ yourself?") and fills in `--vpn-ip`/`--subnet` for you if you say yes.
 
 ## Step 8 — Decentralized mode (no server at all)
 
+<p align="center">
+<img width="1102" height="785" alt="ReVPN-Decentralized" src="https://github.com/user-attachments/assets/dabe9fed-e54c-4896-b633-9ddef6f24517" />
+</p>
+
 Everything above needs one machine running `--server` that both sides
 can reach. Decentralized mode drops that requirement entirely — peers
 connect **directly**, with nothing in between but a public STUN
@@ -237,6 +255,10 @@ This isn't limited to two peers — it's a real mesh. Every peer prints
 its own token and accepts one or more tokens back, so a group of 3+
 just exchanges tokens all-around (everyone needs everyone else's,
 since there's no server to introduce them).
+
+<p align="center">
+  <img width="842" height="614" alt="mesh_decent" src="https://github.com/user-attachments/assets/be106294-e9fd-4bb8-9c13-27a48f84b389" />
+</p>
 
 On each side:
 
@@ -357,6 +379,10 @@ packet loss) so you can sanity-check a server before depending on it.
   need it.
 
 ## The TUI
+
+<p align="center">
+  <img width="889" height="656" alt="tui_ui" src="https://github.com/user-attachments/assets/9b6e4a38-4674-4c99-a2ae-6015085b1e22" />
+</p>
 
 Running `ReVPN` with no arguments opens a full-screen menu (`whiptail`,
 falling back to `dialog`, falling back to plain `--help` text if
