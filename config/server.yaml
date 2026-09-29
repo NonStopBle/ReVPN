@@ -1,5 +1,5 @@
 # ReVPN server configuration
-# Use with:  ./ReVPN --server --config ./config/server.yaml
+# Use with:  ./ReVPN.sh --server --config ./config/server.yaml
 # Any flag you also pass on the command line overrides the value below.
 
 # UDP port to listen on

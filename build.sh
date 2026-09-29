@@ -25,7 +25,7 @@ cd build
 cmake ../engine "${CMAKE_FLAGS[@]}"
 make -j"$(nproc)"
 
-# Marker consulted by ./ReVPN (CLI + TUI) to know whether this build actually
+# Marker consulted by ./ReVPN.sh (CLI + TUI) to know whether this build actually
 # supports --xdp-iface — the engine's --help text mentions the flag either
 # way, so the marker (not the binary) is the source of truth.
 if [[ "$XDP_BUILD" == true ]]; then
@@ -37,4 +37,4 @@ fi
 echo
 echo "Built: $(pwd)/ReVPN-engine"
 echo "AF_XDP: $([[ "$XDP_BUILD" == true ]] && echo "enabled" || echo "disabled (build with --xdp to enable)")"
-echo "Run:   ../ReVPN --help"
+echo "Run:   ../ReVPN.sh --help"

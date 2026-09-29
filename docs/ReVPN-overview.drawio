@@ -1,6 +1,6 @@
 <mxfile host="65bd71144e">
     <diagram name="ReVPN Network Topology" id="revpn-network">
-        <mxGraphModel dx="1365" dy="1022" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1150" pageHeight="820" math="0" shadow="0">
+        <mxGraphModel dx="529" dy="497" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1150" pageHeight="820" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
@@ -13,7 +13,7 @@
                 <mxCell id="subnetnote" parent="1" style="text;html=1;fontSize=11;align=center;fontStyle=2;fontColor=#999999;" value="&lt;b&gt;Overlay VPN subnet&lt;br&gt;10.13.0.0/16&lt;br&gt;(same for every peer,&lt;br&gt;tunneled over the&lt;br&gt;real internet)&lt;/b&gt;" vertex="1">
                     <mxGeometry height="90" width="190" x="470" y="370" as="geometry"/>
                 </mxCell>
-                <mxCell id="siteA" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontSize=11;fontStyle=1;verticalAlign=top;align=center;dashed=1;" value="&lt;span style=&quot;color: rgb(255, 255, 255);&quot;&gt;SITE A — home network&lt;/span&gt;" vertex="1">
+                <mxCell id="siteA" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontSize=11;fontStyle=1;verticalAlign=top;align=center;dashed=1;" value="&lt;span style=&quot;color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;SITE A — home network&lt;/span&gt;" vertex="1">
                     <mxGeometry height="175" width="260" x="40" y="95" as="geometry"/>
                 </mxCell>
                 <mxCell id="routerA" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" value="NAT ROUTER&lt;br&gt;public-facing IP: &lt;b&gt;203.0.113.42&lt;/b&gt;&lt;br&gt;(learned via STUN at startup)" vertex="1">
@@ -22,7 +22,7 @@
                 <mxCell id="hostA" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontStyle=1;" value="PEER: alice&#xa;tun0  10.13.0.2 /16" vertex="1">
                     <mxGeometry height="60" width="220" x="60" y="192" as="geometry"/>
                 </mxCell>
-                <mxCell id="siteB" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontSize=11;fontStyle=1;verticalAlign=top;align=center;dashed=1;" value="&lt;span style=&quot;color: rgb(255, 255, 255);&quot;&gt;SITE B — remote server, public IP&lt;/span&gt;" vertex="1">
+                <mxCell id="siteB" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontSize=11;fontStyle=1;verticalAlign=top;align=center;dashed=1;" value="&lt;span style=&quot;color: light-dark(rgb(255, 255, 255), rgb(230, 230, 230));&quot;&gt;SITE B — remote server, public IP&lt;/span&gt;" vertex="1">
                     <mxGeometry height="175" width="260" x="850" y="95" as="geometry"/>
                 </mxCell>
                 <mxCell id="routerB" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="NO NAT — directly public&lt;br&gt;public IP: &lt;b&gt;198.51.100.17&lt;/b&gt;&lt;br&gt;(learned via STUN at startup)" vertex="1">
@@ -31,7 +31,7 @@
                 <mxCell id="hostB" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;" value="PEER: bob&#xa;tun0  10.13.0.3 /16" vertex="1">
                     <mxGeometry height="60" width="220" x="870" y="192" as="geometry"/>
                 </mxCell>
-                <mxCell id="siteC" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontSize=11;fontStyle=1;verticalAlign=top;align=center;dashed=1;" value="&lt;span style=&quot;color: rgb(255, 255, 255);&quot;&gt;SITE C — a third, separate network&lt;/span&gt;" vertex="1">
+                <mxCell id="siteC" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontSize=11;fontStyle=1;verticalAlign=top;align=center;dashed=1;" value="&lt;span style=&quot;color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;SITE C — a third, separate network&lt;/span&gt;" vertex="1">
                     <mxGeometry height="175" width="260" x="445" y="555" as="geometry"/>
                 </mxCell>
                 <mxCell id="hostC" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;fontStyle=1;" value="PEER: carol&#xa;tun0  10.13.0.4 /16" vertex="1">

@@ -1,5 +1,5 @@
 # ReVPN client configuration
-# Use with:  ./ReVPN --client --config ./config/client.yml
+# Use with:  ./ReVPN.sh --client --config ./config/client.yml
 # Any flag you also pass on the command line overrides the value below.
 
 # Address of the ReVPN server to join

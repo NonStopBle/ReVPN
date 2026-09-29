@@ -48,14 +48,14 @@ fail() { echo "ReVPN: $*" >&2; exit 1; }
 # ============================================================================
 # Preset — last-used settings, saved after every successful launch and
 # reloaded as the new defaults next time (server/client/stress separately,
-# so switching modes doesn't clobber each other's fields). `ReVPN --reset`
+# so switching modes doesn't clobber each other's fields). `ReVPN.sh --reset`
 # deletes it and falls back to the hardcoded defaults above.
 # ============================================================================
 # ReVPN needs root for --server/--client (TUN device, raw sockets), but the
 # preset must stay tied to the real person running it, not to /root — sudo
-# resets $HOME to /root, so without this a `sudo ./ReVPN --client ...` run
+# resets $HOME to /root, so without this a `sudo ./ReVPN.sh --client ...` run
 # would silently save to /root/.config/ReVPN/ where a later plain
-# `./ReVPN` (as the normal user) would never find it.
+# `./ReVPN.sh` (as the normal user) would never find it.
 resolve_real_home() {
     if [[ "$(id -u)" -eq 0 && -n "${SUDO_USER:-}" ]]; then
         local h
@@ -78,7 +78,7 @@ save_preset() {
     mkdir -p "$CONFIG_DIR"
     cat > "$CONFIG_FILE" <<EOF
 # ReVPN saved preset — last settings used, reloaded automatically.
-# Delete this file, or run: ReVPN --reset
+# Delete this file, or run: ReVPN.sh --reset
 PORT=${PORT}
 PORT_SET=${PORT_SET}
 WORKERS=${WORKERS}
@@ -99,7 +99,7 @@ ST_PORT=${ST_PORT}
 DC_ID="${DC_ID}"
 EOF
     # Hand ownership back to the real user when we're running under sudo,
-    # so their own later non-sudo `./ReVPN` can read AND rewrite it.
+    # so their own later non-sudo `./ReVPN.sh` can read AND rewrite it.
     if [[ "$(id -u)" -eq 0 && -n "${SUDO_UID:-}" && -n "${SUDO_GID:-}" ]]; then
         chown -R "${SUDO_UID}:${SUDO_GID}" "$CONFIG_DIR" 2>/dev/null || true
     fi
@@ -159,20 +159,20 @@ ReVPN ${VERSION} — simple mesh VPN (TUN device, UDP hole punching, auto relay)
 Creative By Rezier Labs
 
 USAGE:
-  ReVPN                                Launch the interactive TUI (like nmtui)
-  ReVPN --server  [options]           Start this machine as the relay/rendezvous server
-  ReVPN --client  [options]           Join a ReVPN server as a client (creates tun0)
-  ReVPN --decentralized [options]     Join a peer directly, no server — just a token
-  ReVPN --stress  [options]           Load-test the relay server (no root/TUN needed)
-  ReVPN --help, -h                    Show this help
-  ReVPN --version                     Show version
-  ReVPN --reset                        Clear saved preset, then open the TUI
-  ReVPN --server --config <file>      Load server settings from a YAML file
-  ReVPN --client --config <file>      Load client settings from a YAML file
+  ReVPN.sh                                Launch the interactive TUI (like nmtui)
+  ReVPN.sh --server  [options]           Start this machine as the relay/rendezvous server
+  ReVPN.sh --client  [options]           Join a ReVPN server as a client (creates tun0)
+  ReVPN.sh --decentralized [options]     Join a peer directly, no server — just a token
+  ReVPN.sh --stress  [options]           Load-test the relay server (no root/TUN needed)
+  ReVPN.sh --help, -h                    Show this help
+  ReVPN.sh --version                     Show version
+  ReVPN.sh --reset                        Clear saved preset, then open the TUI
+  ReVPN.sh --server --config <file>      Load server settings from a YAML file
+  ReVPN.sh --client --config <file>      Load client settings from a YAML file
 
 Last-used settings are saved automatically after every launch (to
 ~/.config/ReVPN/preset.conf) and reloaded as the defaults next time you
-run ReVPN, whether via the TUI or plain flags. Run with --reset to wipe
+run ReVPN.sh, whether via the TUI or plain flags. Run with --reset to wipe
 them and start fresh.
 
 --config loads simple "key: value" settings from a YAML file — see
@@ -180,8 +180,8 @@ config/server.yaml and config/client.yaml for the full field list and
 comments. Precedence, lowest to highest: hardcoded defaults → saved
 preset → --config file → any flag also given on the command line.
 
-  ./ReVPN --server --config ./config/server.yaml
-  ./ReVPN --client --config ./config/client.yml
+  ./ReVPN.sh --server --config ./config/server.yaml
+  ./ReVPN.sh --client --config ./config/client.yml
 
 SERVER OPTIONS:
   --port <n>          UDP port to listen on                 (default: ${PORT})
@@ -235,21 +235,21 @@ STRESS-TEST OPTIONS:
 
 EXAMPLES:
   # On the rendezvous machine (needs a public/reachable IP):
-  sudo ReVPN --server --port 9000
+  sudo ReVPN.sh --server --port 9000
 
   # On each peer that wants to join the mesh:
-  sudo ReVPN --client --connect 203.0.113.10:9000 --vpn-ip 10.13.0.2
-  sudo ReVPN --client --connect 203.0.113.10:9000 --vpn-ip 10.13.0.3 --encrypt false
+  sudo ReVPN.sh --client --connect 203.0.113.10:9000 --vpn-ip 10.13.0.2
+  sudo ReVPN.sh --client --connect 203.0.113.10:9000 --vpn-ip 10.13.0.3 --encrypt false
 
   # Load-test the server engine itself:
-  ReVPN --stress --clients 200 --duration 30 --rate 1000
+  ReVPN.sh --stress --clients 200 --duration 30 --rate 1000
 
   # Two peers connecting directly, no server:
-  sudo ReVPN --decentralized --id alice --vpn-ip 10.13.0.2
-  sudo ReVPN --decentralized --id bob   --vpn-ip 10.13.0.3
+  sudo ReVPN.sh --decentralized --id alice --vpn-ip 10.13.0.2
+  sudo ReVPN.sh --decentralized --id bob   --vpn-ip 10.13.0.3
 
   # A 3-peer mesh — everyone exchanges tokens with everyone:
-  sudo ReVPN --decentralized --id alice --vpn-ip 10.13.0.2 \
+  sudo ReVPN.sh --decentralized --id alice --vpn-ip 10.13.0.2 \
       --peer-token <bob's token> --peer-token <carol's token>
 
 EOF
@@ -334,7 +334,7 @@ launch_decentralized() {
 }
 
 # ============================================================================
-# TUI — nmtui-style full-screen menu, shown automatically when ReVPN is run
+# TUI — nmtui-style full-screen menu, shown automatically when ReVPN.sh is run
 # with NO arguments at all. Uses whiptail (or dialog as a fallback); both
 # are the same libnewt-family tool nmtui itself is built on.
 # ============================================================================
@@ -530,21 +530,21 @@ tui_main() {
         case "$CHOICE" in
             Server)
                 if [[ ! -x "$ENGINE_BIN" ]]; then
-                    tui_msg "Not Built" "Engine binary missing.\n\nRun ./build.sh first, then re-run ReVPN."
+                    tui_msg "Not Built" "Engine binary missing.\n\nRun ./build.sh first, then re-run ReVPN.sh."
                     continue
                 fi
                 tui_server_form && { clear; MODE=server; launch_server; }
                 ;;
             Client)
                 if [[ ! -x "$ENGINE_BIN" ]]; then
-                    tui_msg "Not Built" "Engine binary missing.\n\nRun ./build.sh first, then re-run ReVPN."
+                    tui_msg "Not Built" "Engine binary missing.\n\nRun ./build.sh first, then re-run ReVPN.sh."
                     continue
                 fi
                 tui_client_form && { clear; MODE=client; launch_client; }
                 ;;
             Decentralized)
                 if [[ ! -x "$ENGINE_BIN" ]]; then
-                    tui_msg "Not Built" "Engine binary missing.\n\nRun ./build.sh first, then re-run ReVPN."
+                    tui_msg "Not Built" "Engine binary missing.\n\nRun ./build.sh first, then re-run ReVPN.sh."
                     continue
                 fi
                 tui_decentralized_form && { clear; MODE=decentralized; launch_decentralized; }
@@ -553,7 +553,7 @@ tui_main() {
                 tui_stress_form && { clear; launch_stress; }
                 ;;
             Help)
-                tui_msg "ReVPN --help" "$(usage)"
+                tui_msg "ReVPN.sh --help" "$(usage)"
                 ;;
             Quit|"") exit 0 ;;
         esac
@@ -627,7 +627,7 @@ while [[ $# -gt 0 ]]; do
         --size)        ST_SIZE="$2"; shift 2 ;;
         --stress-port) ST_PORT="$2"; shift 2 ;;
 
-        *) fail "unknown option '$1' (see: ReVPN --help)" ;;
+        *) fail "unknown option '$1' (see: ReVPN.sh --help)" ;;
     esac
 done
 

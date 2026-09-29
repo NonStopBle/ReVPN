@@ -45,6 +45,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <map>
 #include <mutex>
 #include <queue>
@@ -2119,6 +2120,76 @@ static void usage(const char* p) {
     printf("  --peer-token tok    (decentralized) a peer's token; repeat this flag\n");
     printf("                      (or comma-separate) for multiple peers — skips\n");
     printf("                      the interactive paste prompt\n");
+    printf("  --config     file   Load settings from a flat YAML file (same format\n");
+    printf("                      and keys as the ReVPN.sh wrapper's --config, minus\n");
+    printf("                      the stress-test-only keys). Any flag also given on\n");
+    printf("                      the command line still overrides the file.\n");
+}
+
+// ── --config <file> ──────────────────────────────────────────────────────────
+// A flat "key: value" YAML loader — no nesting/lists, matches the same
+// minimal format and key set ReVPN.sh's own load_yaml_config() parses
+// (config/server.yaml, config/client.yaml), minus the stress-test-only
+// keys (clients, duration, rate, size, stress_port), since those don't
+// apply to this binary directly. Values loaded here become new defaults;
+// they're applied BEFORE the real flag loop in main() runs, so any flag
+// also given on the command line still wins — same precedence the
+// wrapper script documents.
+struct EngineConfig {
+    std::string mode, vpn_ip, server_ip, comm_s, xdp_ifname;
+    uint16_t bind_port, server_port, client_port;
+    int subnet, mtu, n_workers;
+    uint32_t node_id; bool enc, xdp_force_copy;
+};
+
+static std::string yaml_trim(const std::string& s) {
+    size_t a = s.find_first_not_of(" \t");
+    if (a == std::string::npos) return "";
+    size_t b = s.find_last_not_of(" \t");
+    std::string t = s.substr(a, b - a + 1);
+    if (t.size() >= 2 && ((t.front()=='"' && t.back()=='"') || (t.front()=='\'' && t.back()=='\'')))
+        t = t.substr(1, t.size()-2);
+    return t;
+}
+
+static void load_yaml_config(const std::string& path, EngineConfig& c) {
+    std::ifstream f(path);
+    if (!f) { fprintf(stderr, "config file not found: %s\n", path.c_str()); exit(1); }
+
+    std::string line;
+    while (std::getline(f, line)) {
+        auto hash = line.find('#');
+        if (hash != std::string::npos) line = line.substr(0, hash);
+        auto colon = line.find(':');
+        if (colon == std::string::npos) continue;
+
+        std::string key = yaml_trim(line.substr(0, colon));
+        std::string val = yaml_trim(line.substr(colon + 1));
+        if (key.empty()) continue;
+
+        if (key == "port") {
+            if (val.empty()) continue;
+            uint16_t p = (uint16_t)std::stoi(val);
+            if (c.mode == "server") c.bind_port = p; else c.client_port = p;
+        }
+        else if (key == "workers")   { if (!val.empty()) c.n_workers = std::stoi(val); }
+        else if (key == "xdp_iface") { c.xdp_ifname = val; }
+        else if (key == "xdp_copy")  { c.xdp_force_copy = (val == "true"); }
+        else if (key == "connect") {
+            auto p = val.rfind(':');
+            if (p != std::string::npos) {
+                c.server_ip = val.substr(0, p);
+                c.server_port = (uint16_t)std::stoi(val.substr(p + 1));
+            }
+        }
+        else if (key == "vpn_ip")     { c.vpn_ip = val; }
+        else if (key == "subnet")     { if (!val.empty()) c.subnet = std::stoi(val); }
+        else if (key == "node_id")    { if (!val.empty()) c.node_id = (uint32_t)strtoul(val.c_str(), 0, 16); }
+        else if (key == "mtu")        { if (!val.empty()) c.mtu = std::stoi(val); }
+        else if (key == "encrypt")    { c.enc = (val != "false"); }
+        else if (key == "relay_only") { c.comm_s = (val == "true") ? "relay" : "p2p"; }
+        // unknown keys (including stress-test-only ones) are ignored
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -2138,9 +2209,33 @@ int main(int argc, char* argv[]) {
     std::string p2p_id;
     std::vector<std::string> peer_tokens;
 
+    // A config file's values become the new defaults before the real flag
+    // loop below runs, so any flag also given on the command line still
+    // overrides it — same precedence ReVPN.sh documents for its own
+    // --config. --mode is pre-scanned too since the config loader needs it
+    // to know whether a bare "port:" key means the server's bind port or
+    // the client/decentralized local port.
+    std::string cfg_path;
     for (int i=1; i<argc; i++) {
         std::string a=argv[i];
-        if      (a=="--mode"    &&i+1<argc) mode=argv[++i];
+        if      (a=="--config" && i+1<argc) cfg_path=argv[i+1];
+        else if (a=="--mode"   && i+1<argc) mode=argv[i+1];
+    }
+    if (!cfg_path.empty()) {
+        EngineConfig c{mode, vpn_ip, server_ip, comm_s, xdp_ifname,
+                       bind_port, server_port, client_port,
+                       subnet, mtu, n_workers, node_id, enc, xdp_force_copy};
+        load_yaml_config(cfg_path, c);
+        vpn_ip=c.vpn_ip; server_ip=c.server_ip; comm_s=c.comm_s; xdp_ifname=c.xdp_ifname;
+        bind_port=c.bind_port; server_port=c.server_port; client_port=c.client_port;
+        subnet=c.subnet; mtu=c.mtu; n_workers=c.n_workers; node_id=c.node_id;
+        enc=c.enc; xdp_force_copy=c.xdp_force_copy;
+    }
+
+    for (int i=1; i<argc; i++) {
+        std::string a=argv[i];
+        if      (a=="--config"  &&i+1<argc) ++i; // already applied above
+        else if (a=="--mode"    &&i+1<argc) mode=argv[++i];
         else if (a=="--vpn-ip"  &&i+1<argc) vpn_ip=argv[++i];
         else if (a=="--bind"    &&i+1<argc) {
             std::string r=argv[++i]; auto c=r.rfind(':');

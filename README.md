@@ -2,6 +2,8 @@
   
 # ReVPN
 
+<img width="2816" height="1536" alt="revpn (1)" src="https://github.com/user-attachments/assets/1d8d995e-4514-49ae-b9fb-9a9bb045ea85" />
+
 **ReVPN: TUN-based mesh networking with UDP hole punching, automatic
 relay fallback, optional AF_XDP zero-copy, and a server-less mode
 that needs nothing but a STUN query and a token.**
@@ -12,10 +14,10 @@ that needs nothing but a STUN query and a token.**
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)
 ![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-lightgrey)
 
-Created by **Rezier Labs**.
+Creative by **Rezier Labs**.
 
 No accounts, no cloud control plane, no dashboard to sign into. Run
-one machine as the server (relay/rendezvous), run `ReVPN` on every
+one machine as the server (relay/rendezvous), run `ReVPN.sh` on every
 other computer to join — clients connect directly to each other when
 they can, and automatically fall back to relaying through the server
 when they can't (strict routers/firewalls, symmetric NAT). Two
@@ -34,6 +36,9 @@ reach *me* — answer my requests, accept my connections — when I never
 configured port forwarding on my own router, and never opened a
 single port? I spent a long time researching that question before the
 answer clicked: **UDP hole punching**.
+
+<img width="1091" height="675" alt="ReVPN-basic-communication" src="https://github.com/user-attachments/assets/613f9f6a-fa1f-43f4-aabf-d0b81a14883d" />
+
 
 In short, most home routers use NAT (Network Address Translation) to
 share one public IP across every device behind them, and by default
@@ -61,7 +66,7 @@ PC sitting behind a NAT/router with no port forwarding available (a
 locked-down home router, a college dorm network, a mobile hotspot).
 
 That idea goes further in **decentralized mode**
-(`ReVPN --decentralized`, [Step 8](#step-8--decentralized-mode-no-server-at-all)):
+(`ReVPN.sh --decentralized`, [Step 8](#step-8--decentralized-mode-no-server-at-all)):
 no relay/rendezvous server at all, not even for setup. Instead of a
 server both sides connect to, each side asks a public STUN server
 "what does the internet see me as?", packs the answer into a short
@@ -83,15 +88,15 @@ sides punched through on the first attempt.
 cd ReVPN
 ./build.sh                                        # build the engine once
 
-sudo ./ReVPN --server --port 9000                  # on the server machine
-sudo ./ReVPN --client --connect <server-ip>:9000 --vpn-ip 10.13.0.2   # on each client
+sudo ./ReVPN.sh --server --port 9000                  # on the server machine
+sudo ./ReVPN.sh --client --connect <server-ip>:9000 --vpn-ip 10.13.0.2   # on each client
 ```
 
 Give every client a **different** `--vpn-ip` (`10.13.0.2`, `10.13.0.3`, ...).
 That's a working mesh — ping, SSH, file shares, or game between any two
 clients using their `10.13.0.x` addresses, same as a LAN.
 
-No flags handy? Run `./ReVPN` with no arguments for a full-screen menu
+No flags handy? Run `./ReVPN.sh` with no arguments for a full-screen menu
 instead — pick Server or Client, fill in the same fields interactively,
 and it remembers what you entered for next time.
 
@@ -133,7 +138,7 @@ and it remembers what you entered for next time.
   <img width="842" height="614" alt="revpn_help" src="https://github.com/user-attachments/assets/009af72e-4eb7-4ce5-8390-bfd9d3ca128f" />
 </p>
 
-<p align="center"><b>Figure 2:</b> <code>./ReVPN -h</code> — the five modes: server, client, decentralized, stress, help.</p>
+<p align="center"><b>Figure 2:</b> <code>./ReVPN.sh -h</code> — the five modes: server, client, decentralized, stress, help.</p>
 
 
 ```sh
@@ -141,7 +146,7 @@ cd ReVPN
 ./build.sh
 ```
 
-This builds `build/ReVPN-engine`, the program the `ReVPN` command drives.
+This builds `build/ReVPN-engine`, the program the `ReVPN.sh` command drives.
 
 ---
 
@@ -156,7 +161,7 @@ Pick one computer with a public/reachable IP to be the server everyone
 else connects through:
 
 ```sh
-sudo ./ReVPN --server --port 9000
+sudo ./ReVPN.sh --server --port 9000
 ```
 
 Leave this running. It doesn't join the network itself by default — it
@@ -177,7 +182,7 @@ On every other computer you want on the network:
 <p align="center"><b>Figure 4:</b> A client joining that server — VPN IP, node ID, and comm mode confirmed.</p>
 
 ```sh
-sudo ./ReVPN --client --connect <server-ip>:9000 --vpn-ip 10.13.0.2
+sudo ./ReVPN.sh --client --connect <server-ip>:9000 --vpn-ip 10.13.0.2
 ```
 
 Give each computer a **different** `--vpn-ip` — that's its address on
@@ -192,7 +197,7 @@ over a LAN).
 
 ## Step 4 — Prefer a menu over flags?
 
-Run `./ReVPN` with no arguments — a full-screen menu opens. Pick Server
+Run `./ReVPN.sh` with no arguments — a full-screen menu opens. Pick Server
 or Client and fill in the same fields interactively; it remembers what
 you entered last time and pre-fills it next time.
 
@@ -203,7 +208,7 @@ you entered last time and pre-fills it next time.
 - `--encrypt false` — turn off encryption
 - `--relay-only` — never attempt a direct connection, always relay
   through the server (useful behind very strict firewalls)
-- `./ReVPN --help` — every flag, with defaults
+- `./ReVPN.sh --help` — every flag, with defaults
 
 ---
 
@@ -238,7 +243,7 @@ can then reach the server itself at that address, not just relay
 through it for each other:
 
 ```sh
-sudo ./ReVPN --server --port 9000 --vpn-ip 10.13.0.1
+sudo ./ReVPN.sh --server --port 9000 --vpn-ip 10.13.0.1
 ```
 
 The TUI's Server form asks the same question ("Also join the mesh
@@ -277,10 +282,10 @@ On each side:
 
 ```sh
 # Alice:
-sudo ./ReVPN --decentralized --id alice --vpn-ip 10.13.0.2
+sudo ./ReVPN.sh --decentralized --id alice --vpn-ip 10.13.0.2
 
 # Bob:
-sudo ./ReVPN --decentralized --id bob --vpn-ip 10.13.0.3
+sudo ./ReVPN.sh --decentralized --id bob --vpn-ip 10.13.0.3
 ```
 
 Each side prints a token and then waits for the other side's:
@@ -337,7 +342,7 @@ fresh token exchange and a restart, not a server hop.
 No second computer handy? Simulate one:
 
 ```sh
-./ReVPN --stress --clients 200 --duration 30
+./ReVPN.sh --stress --clients 200 --duration 30
 ```
 
 This throws 200 simulated clients at your server locally, no admin
@@ -348,7 +353,7 @@ packet loss) so you can sanity-check a server before depending on it.
 
 ## What's in this folder
 
-- `ReVPN` — the command you run (also opens the menu with no arguments)
+- `ReVPN.sh` — the command you run (also opens the menu with no arguments)
 - `python/` — a Python version of the same tool, for Windows and anyone
   who'd rather not compile C++ (see `python/README.md`)
 - `config/` — example settings files (`--config path/to/file.yaml`)
@@ -399,7 +404,7 @@ packet loss) so you can sanity-check a server before depending on it.
 
 <p align="center"><b>Figure 7:</b> The TUI main menu — the same five modes, picked from a whiptail screen.</p>
 
-Running `ReVPN` with no arguments opens a full-screen menu (`whiptail`,
+Running `ReVPN.sh` with no arguments opens a full-screen menu (`whiptail`,
 falling back to `dialog`, falling back to plain `--help` text if
 neither is installed) — Server / Client / Stress / Help / Quit, each
 walking through the same fields the flags accept, then a confirm
@@ -415,7 +420,7 @@ enabled.
 
 Every launch (TUI or flags) saves what you used to
 `~/.config/ReVPN/preset.conf`, and reloads it as the new defaults next
-time — flags you do pass always win. `./ReVPN --reset` wipes it and
+time — flags you do pass always win. `./ReVPN.sh --reset` wipes it and
 opens the menu with the original hardcoded defaults. `--config <file>`
 loads a flat `key: value` YAML file instead (see `config/server.yaml`
 / `config/client.yaml`); precedence is defaults → saved preset →
@@ -446,7 +451,7 @@ There are **two** separate Windows binaries:
 | `--server`                 | Full C++ engine (recvmmsg-class throughput)                  | Pure-Python server                                  |
 | `--client` / TUN           | Own Wintun integration (dynamically loaded `wintun.dll`), unverified on real hardware | Independent Wintun backend, unverified on real hardware |
 | Server-as-peer (`--vpn-ip`)| Linux only — fails cleanly on Windows with a clear message    | Not exposed on the Windows build                    |
-| Stress test                | Via the bash `ReVPN --stress` wrapper, not the raw .exe       | Built in (`--stress`, or from the menu)             |
+| Stress test                | Via the bash `ReVPN.sh --stress` wrapper, not the raw .exe       | Built in (`--stress`, or from the menu)             |
 
 Build them with `./build_windows.sh` (needs
 `g++-mingw-w64-x86-64-posix binutils-mingw-w64-x86-64`) and
@@ -480,7 +485,7 @@ hardware was available):**
   installed** Wine-hosted Windows Python (a clean-machine proxy): it
   resolved and installed the `windows-curses` dependency
   automatically, created a working `ReVPN.exe` shim on `PATH`, and
-  `ReVPN --help` / `--stress` ran correctly from an unrelated
+  `ReVPN.sh --help` / `--stress` ran correctly from an unrelated
   directory via `cmd.exe`.
 - One Wine-specific quirk found (not expected on real Windows): the
   Python `.exe`'s stdout can fail with an "Invalid handle" error if
@@ -494,7 +499,7 @@ hardware was available):**
 - `build.sh` / `build_windows.sh` — build `engine/` into
   `build/ReVPN-engine` (Linux) or `build-windows/ReVPN-engine.exe`
   (MinGW cross-compile).
-- `ReVPN` — the CLI + TUI wrapper end users run.
+- `ReVPN.sh` — the CLI + TUI wrapper end users run.
 - `stress_test.sh` / `tools/stress_client.py` — the load-test harness.
 - `config/` — example `server.yaml` / `client.yaml` for `--config`.
 - `python/` — `ReVPN-py`: a pure-Python, wire-compatible port of this

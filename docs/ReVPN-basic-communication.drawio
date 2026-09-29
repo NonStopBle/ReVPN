@@ -1,0 +1,65 @@
+<mxfile host="65bd71144e">
+    <diagram name="ReVPN Basic Communication" id="revpn-basic-comm">
+        <mxGraphModel dx="771" dy="724" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1150" pageHeight="700" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="title" parent="1" style="text;html=1;fontSize=20;fontStyle=1;align=center;verticalAlign=middle;" value="ReVPN — network topology of server / client (relay) mode" vertex="1">
+                    <mxGeometry height="30" width="1030" x="60" y="10" as="geometry"/>
+                </mxCell>
+                <mxCell id="subnetnote" parent="1" style="text;html=1;fontSize=10;align=center;fontStyle=2;fontColor=light-dark(#999999,#FFFFFF);" value="overlay VPN subnet&#xa;10.13.0.0/16&#xa;(same for every peer,&#xa;tunneled over the&#xa;real internet)" vertex="1">
+                    <mxGeometry height="90" width="190" x="480" y="402" as="geometry"/>
+                </mxCell>
+                <mxCell id="siteS" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontSize=12;fontStyle=1;verticalAlign=top;align=center;dashed=1;" value="SITE S — the relay / rendezvous" vertex="1">
+                    <mxGeometry height="185" width="260" x="445" y="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="routerS" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" value="PUBLIC / REACHABLE IP&lt;br&gt;198.51.100.5" vertex="1">
+                    <mxGeometry height="60" width="220" x="465" y="82" as="geometry"/>
+                </mxCell>
+                <mxCell id="hostS" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontStyle=1;" value="SERVER&#xa;bridge + rendezvous&#xa;(introduces clients to each other)" vertex="1">
+                    <mxGeometry height="60" width="220" x="465" y="152" as="geometry"/>
+                </mxCell>
+                <mxCell id="siteA" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;verticalAlign=top;align=center;dashed=1;" value="SITE A — client, home network" vertex="1">
+                    <mxGeometry height="185" width="260" x="40" y="460" as="geometry"/>
+                </mxCell>
+                <mxCell id="routerA" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" value="NAT ROUTER&#xa;public-facing IP: 203.0.113.42" vertex="1">
+                    <mxGeometry height="60" width="220" x="60" y="492" as="geometry"/>
+                </mxCell>
+                <mxCell id="hostA" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontStyle=1;" value="CLIENT: alice&#xa;tun0  10.13.0.2 /16" vertex="1">
+                    <mxGeometry height="60" width="220" x="60" y="562" as="geometry"/>
+                </mxCell>
+                <mxCell id="siteB" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontSize=12;fontStyle=1;verticalAlign=top;align=center;dashed=1;" value="SITE B — client, a different network" vertex="1">
+                    <mxGeometry height="185" width="260" x="850" y="460" as="geometry"/>
+                </mxCell>
+                <mxCell id="routerB" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" value="NAT ROUTER&#xa;public-facing IP: 192.0.2.88" vertex="1">
+                    <mxGeometry height="60" width="220" x="870" y="492" as="geometry"/>
+                </mxCell>
+                <mxCell id="hostB" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;" value="CLIENT: bob&#xa;tun0  10.13.0.3 /16" vertex="1">
+                    <mxGeometry height="60" width="220" x="870" y="562" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend" parent="1" style="text;html=1;fontSize=10;align=left;fontStyle=2;fontColor=light-dark(#666666,#FFFFFF);" value="&lt;span style=&quot;&quot;&gt;Dashed thin = registration / PEER_INFO (control-plane, via the server). Solid thick, dark = relay path (client to client, through the server). Solid thick, green = direct P2P tunnel&amp;nbsp;&lt;/span&gt;&lt;div&gt;&lt;span style=&quot;&quot;&gt;(used automatically once hole-punching succeeds; falls back to the relay path above if it can&#39;t).&lt;/span&gt;&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="40" width="1030" x="20" y="645" as="geometry"/>
+                </mxCell>
+                <mxCell id="regA" edge="1" parent="1" source="hostA" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;endArrow=block;startArrow=block;fontSize=9;strokeColor=#9673a6;exitX=1;exitY=0.25;entryX=0.2;entryY=1;exitDx=0;exitDy=0;" target="hostS" value="register">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="509" y="577"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="regB" edge="1" parent="1" source="hostB" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;endArrow=block;startArrow=block;fontSize=9;strokeColor=#9673a6;exitX=0;exitY=0.25;entryX=0.8;entryY=1;exitDx=0;exitDy=0;fontColor=light-dark(#000000,#FFFFFF);" target="hostS" value="register">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="relayA" edge="1" parent="1" source="siteA" style="edgeStyle=none;html=1;strokeWidth=3;strokeColor=#333333;fontSize=9;fontStyle=1;exitX=0.5;exitY=0;entryX=0.15;entryY=1;exitDx=0;exitDy=0;" target="hostS" value="relay path (fallback)">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="relayB" edge="1" parent="1" source="siteB" style="edgeStyle=none;html=1;strokeWidth=3;strokeColor=#333333;fontSize=9;fontStyle=1;exitX=0.5;exitY=0;entryX=0.85;entryY=1;exitDx=0;exitDy=0;" target="hostS" value="relay path (fallback)">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="p2pAB" edge="1" parent="1" source="hostA" style="edgeStyle=none;html=1;strokeWidth=3;strokeColor=#82b366;fontSize=9;fontStyle=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="hostB" value="direct P2P tunnel (preferred, tried first)">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>
