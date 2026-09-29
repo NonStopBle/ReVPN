@@ -468,7 +468,18 @@ which don't apply to the binary), same precedence, no bash or preset
 file involved. That's what makes it safe to call the engine directly
 in a systemd unit or Docker container: point `--config` at a file you
 control and every run behaves identically, with no dependency on
-`ReVPN.sh` or its saved preset file at all. See [ReVPN.sh vs calling
+`ReVPN.sh` or its saved preset file at all.
+
+`ReVPN.sh` also **writes** one of these for you: every successful
+`--server`, `--client`, or `--decentralized` launch regenerates
+`config/generated-<mode>.yaml`, matching whatever settings actually
+ran (flags, preset, or an earlier `--config`, whichever won), and
+prints the exact `ReVPN-engine --mode ... --config ...` command to run
+it directly next time. Peer tokens are one-time secrets and are never
+written into it — pass `--peer-token` alongside `--config` for
+decentralized mode. Try a setup through the TUI or flags once, then
+hand the generated file straight to a systemd unit or container. See
+[ReVPN.sh vs calling
 the engine directly](#revpnsh-vs-calling-the-engine-directly) above.
 
 ## Stress test internals

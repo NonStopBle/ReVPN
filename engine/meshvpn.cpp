@@ -2136,7 +2136,7 @@ static void usage(const char* p) {
 // also given on the command line still wins — same precedence the
 // wrapper script documents.
 struct EngineConfig {
-    std::string mode, vpn_ip, server_ip, comm_s, xdp_ifname;
+    std::string mode, vpn_ip, server_ip, comm_s, xdp_ifname, p2p_id;
     uint16_t bind_port, server_port, client_port;
     int subnet, mtu, n_workers;
     uint32_t node_id; bool enc, xdp_force_copy;
@@ -2188,6 +2188,7 @@ static void load_yaml_config(const std::string& path, EngineConfig& c) {
         else if (key == "mtu")        { if (!val.empty()) c.mtu = std::stoi(val); }
         else if (key == "encrypt")    { c.enc = (val != "false"); }
         else if (key == "relay_only") { c.comm_s = (val == "true") ? "relay" : "p2p"; }
+        else if (key == "id")         { c.p2p_id = val; }
         // unknown keys (including stress-test-only ones) are ignored
     }
 }
@@ -2222,11 +2223,12 @@ int main(int argc, char* argv[]) {
         else if (a=="--mode"   && i+1<argc) mode=argv[i+1];
     }
     if (!cfg_path.empty()) {
-        EngineConfig c{mode, vpn_ip, server_ip, comm_s, xdp_ifname,
+        EngineConfig c{mode, vpn_ip, server_ip, comm_s, xdp_ifname, p2p_id,
                        bind_port, server_port, client_port,
                        subnet, mtu, n_workers, node_id, enc, xdp_force_copy};
         load_yaml_config(cfg_path, c);
         vpn_ip=c.vpn_ip; server_ip=c.server_ip; comm_s=c.comm_s; xdp_ifname=c.xdp_ifname;
+        p2p_id=c.p2p_id;
         bind_port=c.bind_port; server_port=c.server_port; client_port=c.client_port;
         subnet=c.subnet; mtu=c.mtu; n_workers=c.n_workers; node_id=c.node_id;
         enc=c.enc; xdp_force_copy=c.xdp_force_copy;
