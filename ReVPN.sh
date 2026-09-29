@@ -550,6 +550,88 @@ Proceed?" 19 64 || return 1
     return 0
 }
 
+tui_persistence_form() {
+    local mode_choice
+    mode_choice="$(box --title "Startup Persistence" --menu \
+        "Run which mode automatically on every boot?" 12 64 2 \
+        client "Join a server as a client, on startup" \
+        server "Start the relay/rendezvous server, on startup" \
+    )" || return 1
+    PERSIST_MODE="$mode_choice"
+
+    local default_cfg="$CONFIG_DIR/generated-${PERSIST_MODE}.yaml"
+    [[ -f "$default_cfg" ]] || default_cfg="$CONFIG_DIR/${PERSIST_MODE}.yaml"
+    PERSIST_CFG="$(tui_input "Startup Persistence: Config File" \
+        "Path to the YAML config to load on every boot\n(a --config file saved earlier, e.g. from this menu)" \
+        "$default_cfg" 11 70)" || return 1
+
+    if [[ ! -f "$PERSIST_CFG" ]]; then
+        tui_msg "Not Found" "No file at:\n\n  $PERSIST_CFG\n\nRun ${PERSIST_MODE^} once first (it saves config/generated-${PERSIST_MODE}.yaml), then come back here."
+        return 1
+    fi
+
+    tui_yesno "Confirm" \
+"Install as a systemd service, starting on every boot:
+
+  Mode   : ${PERSIST_MODE}
+  Config : ${PERSIST_CFG}
+
+This writes a unit file to:
+  ${CONFIG_DIR}/systemd/revpn-${PERSIST_MODE}.service
+
+And prints the sudo commands to install + enable it
+(nothing is installed system-wide without your say-so).
+
+Proceed?" 15 70 || return 1
+    return 0
+}
+
+write_persistence_unit() {
+    local mode="$1" cfg="$2"
+    local unit_dir="$CONFIG_DIR/systemd"
+    local unit_file="$unit_dir/revpn-${mode}.service"
+    mkdir -p "$unit_dir"
+
+    cat > "$unit_file" <<EOF
+[Unit]
+Description=ReVPN mesh VPN (${mode} mode)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=${ENGINE_BIN} --mode ${mode} --config ${cfg}
+WorkingDirectory=${SELF_DIR}
+StandardOutput=journal
+StandardError=journal
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    if [[ "$(id -u)" -eq 0 && -n "${SUDO_UID:-}" && -n "${SUDO_GID:-}" ]]; then
+        chown "${SUDO_UID}:${SUDO_GID}" "$unit_file" 2>/dev/null || true
+    fi
+
+    local install_cmds
+    install_cmds="sudo cp \"$unit_file\" /etc/systemd/system/revpn-${mode}.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now revpn-${mode}"
+
+    if [[ -n "$TUI_TOOL" ]]; then
+        tui_msg "Unit File Written" "Wrote:
+  $unit_file
+
+To install and start it on boot, run:
+
+  ${install_cmds}"
+    fi
+    echo "ReVPN: wrote $unit_file"
+    echo "ReVPN: to install and enable it, run:"
+    echo "  $install_cmds"
+}
+
 tui_stress_form() {
     ST_CLIENTS="$(tui_input  "Stress Test: Clients"  "Simulated clients"     "$ST_CLIENTS"  10 60)" || return 1
     ST_DURATION="$(tui_input "Stress Test: Duration" "Test length, seconds"  "$ST_DURATION" 10 60)" || return 1
@@ -581,11 +663,12 @@ tui_main() {
 
     while true; do
         CHOICE="$(box --title "ReVPN — Main Menu" --menu \
-            "No arguments given — pick what to do (like nmtui):" 18 70 6 \
+            "No arguments given — pick what to do (like nmtui):" 20 70 7 \
             Server        "Start this machine as the relay/rendezvous server" \
             Client        "Join a ReVPN server as a client"                  \
             Decentralized "Connect directly to a peer — no server, just a token" \
             Stress        "Stress-test the relay server (no root needed)"    \
+            Persistence   "Set as startup persistence (run on every boot)"    \
             Help          "Show full --help text"                            \
             Quit          "Exit"                                             \
         )" || exit 0
@@ -614,6 +697,9 @@ tui_main() {
                 ;;
             Stress)
                 tui_stress_form && { clear; launch_stress; }
+                ;;
+            Persistence)
+                tui_persistence_form && { clear; write_persistence_unit "$PERSIST_MODE" "$PERSIST_CFG"; }
                 ;;
             Help)
                 tui_msg "ReVPN.sh --help" "$(usage)"

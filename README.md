@@ -482,6 +482,15 @@ hand the generated file straight to a systemd unit or container. See
 [ReVPN.sh vs calling
 the engine directly](#revpnsh-vs-calling-the-engine-directly) above.
 
+The TUI's **Persistence** menu item automates the systemd side of this:
+pick client or server mode and a saved `--config` file (typically a
+`generated-<mode>.yaml` from above), and it writes a ready-to-use
+`config/systemd/revpn-<mode>.service` unit — pointing `ExecStart` at
+`build/ReVPN-engine --mode <mode> --config <file>` — plus the exact
+`sudo cp` / `systemctl daemon-reload` / `systemctl enable --now revpn-<mode>`
+commands to install and start it on every boot. Nothing is installed
+system-wide automatically; you run those commands yourself.
+
 ## Stress test internals
 
 `--stress` starts a throwaway server plus N synthetic UDP "clients"
