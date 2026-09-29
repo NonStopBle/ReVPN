@@ -110,6 +110,7 @@ and it remembers what you entered for next time.
 - [Step 2 — Start the server](#step-2--start-the-server)
 - [Step 3 — Connect a client](#step-3--connect-a-client)
 - [Step 4 — Prefer a menu over flags?](#step-4--prefer-a-menu-over-flags)
+- [ReVPN.sh vs calling the engine directly](#revpnsh-vs-calling-the-engine-directly)
 - [Step 5 — Common adjustments](#step-5--common-adjustments)
 - [Step 6 — Windows](#step-6--windows)
 - [Step 7 — Server-as-peer (server joins the mesh too)](#step-7--server-as-peer-server-joins-the-mesh-too)
@@ -200,6 +201,40 @@ over a LAN).
 Run `./ReVPN.sh` with no arguments — a full-screen menu opens. Pick Server
 or Client and fill in the same fields interactively; it remembers what
 you entered last time and pre-fills it next time.
+
+---
+
+## ReVPN.sh vs calling the engine directly
+
+Everything above goes through `ReVPN.sh` — that's the right entry point
+for interactive use, testing, and quickly trying out a config, since it
+adds the TUI menu, saved presets, and `--config` YAML loading in bash
+before ever touching the engine.
+
+For a real, long-running deployment (a systemd unit, a Docker
+container, an init script, anything that shouldn't depend on bash
+being present) call the engine binary directly instead — it's a single
+static-ish binary with no wrapper dependency, and as of the `--config`
+support added to the engine itself, it can load the exact same YAML
+files `ReVPN.sh` uses, with no bash in the loop at all:
+
+```sh
+# Server, straight from the binary:
+sudo ./build/ReVPN-engine --mode server --config ./config/server.yaml
+
+# Client, straight from the binary:
+sudo ./build/ReVPN-engine --mode client --config ./config/client.yaml
+
+# Decentralized, straight from the binary:
+sudo ./build/ReVPN-engine --mode decentralized --id alice --vpn-ip 10.13.0.2
+```
+
+Precedence is identical either way: hardcoded defaults → `--config`
+file → any flag also given on the command line. Use `ReVPN.sh` (or its
+TUI) while you're figuring out settings or doing a quick manual test;
+point systemd/Docker/init scripts at `./build/ReVPN-engine` directly
+once you know the config you want to run for real. Run
+`./build/ReVPN-engine --help` for the engine's own full flag list.
 
 ---
 
@@ -425,6 +460,15 @@ opens the menu with the original hardcoded defaults. `--config <file>`
 loads a flat `key: value` YAML file instead (see `config/server.yaml`
 / `config/client.yaml`); precedence is defaults → saved preset →
 `--config` file → explicit flag.
+
+`build/ReVPN-engine` itself also understands `--config <file>` —
+same flat YAML format and key set (minus the stress-test-only keys,
+which don't apply to the binary), same precedence, no bash or preset
+file involved. That's what makes it safe to call the engine directly
+in a systemd unit or Docker container: point `--config` at a file you
+control and every run behaves identically, with no dependency on
+`ReVPN.sh` or `~/.config/ReVPN/` at all. See [ReVPN.sh vs calling the
+engine directly](#revpnsh-vs-calling-the-engine-directly) above.
 
 ## Stress test internals
 
