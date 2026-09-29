@@ -13,6 +13,11 @@ __pycache__/
 
 TestVPN.zip
 
+# ReVPN.sh's saved last-used settings (regenerated automatically; never
+# something to commit — see config/server.yaml / config/client.yaml for
+# the tracked, hand-written examples instead)
+/config/preset.conf
+
 # draw.io editor artifacts (backup/temp files the desktop app and VS Code
 # extension create next to a .drawio file — never the diagram itself)
 *.drawio.bkp

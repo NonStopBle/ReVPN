@@ -51,21 +51,14 @@ fail() { echo "ReVPN: $*" >&2; exit 1; }
 # so switching modes doesn't clobber each other's fields). `ReVPN.sh --reset`
 # deletes it and falls back to the hardcoded defaults above.
 # ============================================================================
-# ReVPN needs root for --server/--client (TUN device, raw sockets), but the
-# preset must stay tied to the real person running it, not to /root — sudo
-# resets $HOME to /root, so without this a `sudo ./ReVPN.sh --client ...` run
-# would silently save to /root/.config/ReVPN/ where a later plain
-# `./ReVPN.sh` (as the normal user) would never find it.
-resolve_real_home() {
-    if [[ "$(id -u)" -eq 0 && -n "${SUDO_USER:-}" ]]; then
-        local h
-        h="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)"
-        if [[ -n "$h" ]]; then echo "$h"; return; fi
-    fi
-    echo "$HOME"
-}
-REAL_HOME="$(resolve_real_home)"
-CONFIG_DIR="${XDG_CONFIG_HOME:-$REAL_HOME/.config}/ReVPN"
+# Saved inside this checkout's own config/ directory (next to
+# server.yaml/client.yaml), not under the user's home — ReVPN.sh stays
+# fully self-contained in wherever it's checked out. ReVPN needs root for
+# --server/--client (TUN device, raw sockets), so a `sudo ./ReVPN.sh
+# --client ...` run would otherwise leave this file root-owned, and a
+# later plain `./ReVPN.sh` (as the normal user) couldn't rewrite it —
+# ownership is handed back to the invoking user in save_preset() below.
+CONFIG_DIR="$SELF_DIR/config"
 CONFIG_FILE="$CONFIG_DIR/preset.conf"
 
 load_preset() {
@@ -171,9 +164,9 @@ USAGE:
   ReVPN.sh --client --config <file>      Load client settings from a YAML file
 
 Last-used settings are saved automatically after every launch (to
-~/.config/ReVPN/preset.conf) and reloaded as the defaults next time you
-run ReVPN.sh, whether via the TUI or plain flags. Run with --reset to wipe
-them and start fresh.
+config/preset.conf, next to this script) and reloaded as the defaults
+next time you run ReVPN.sh, whether via the TUI or plain flags. Run
+with --reset to wipe them and start fresh.
 
 --config loads simple "key: value" settings from a YAML file — see
 config/server.yaml and config/client.yaml for the full field list and

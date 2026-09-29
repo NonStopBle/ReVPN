@@ -453,10 +453,11 @@ enabled.
 
 ## Saved settings (presets) and `--config`
 
-Every launch (TUI or flags) saves what you used to
-`~/.config/ReVPN/preset.conf`, and reloads it as the new defaults next
-time — flags you do pass always win. `./ReVPN.sh --reset` wipes it and
-opens the menu with the original hardcoded defaults. `--config <file>`
+Every launch (TUI or flags) saves what you used to `config/preset.conf`
+(next to `ReVPN.sh` itself, not under your home directory — this keeps
+a checkout fully self-contained), and reloads it as the new defaults
+next time — flags you do pass always win. `./ReVPN.sh --reset` wipes it
+and opens the menu with the original hardcoded defaults. `--config <file>`
 loads a flat `key: value` YAML file instead (see `config/server.yaml`
 / `config/client.yaml`); precedence is defaults → saved preset →
 `--config` file → explicit flag.
@@ -467,8 +468,8 @@ which don't apply to the binary), same precedence, no bash or preset
 file involved. That's what makes it safe to call the engine directly
 in a systemd unit or Docker container: point `--config` at a file you
 control and every run behaves identically, with no dependency on
-`ReVPN.sh` or `~/.config/ReVPN/` at all. See [ReVPN.sh vs calling the
-engine directly](#revpnsh-vs-calling-the-engine-directly) above.
+`ReVPN.sh` or its saved preset file at all. See [ReVPN.sh vs calling
+the engine directly](#revpnsh-vs-calling-the-engine-directly) above.
 
 ## Stress test internals
 
