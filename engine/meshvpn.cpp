@@ -217,7 +217,13 @@ struct __attribute__((packed)) RegPkt {
     uint32_t vpn_ip;
     uint16_t udp_port;      // big-endian
     uint8_t  public_ip[4];
-    uint8_t  _pad[35];
+    int32_t  nat_delta;     // sender's measured symmetric-NAT port step
+                             // (host byte order; 0 = none/unknown) — see
+                             // p2p_detect_nat_delta(). Carved out of what
+                             // used to be an all-zero pad, so an old peer
+                             // on an unpatched build still sends 0 here
+                             // (safe: same as "unknown").
+    uint8_t  _pad[31];
 };
 static_assert(sizeof(RegPkt) == 50);
 
@@ -402,6 +408,9 @@ struct Server {
         sockaddr_in              pub_addr;
         uint32_t                 vpn_ip;
         uint32_t                 node_id;
+        int32_t                  nat_delta = 0; // last REGISTER's measured
+                                                 // NAT port step, relayed
+                                                 // to new peers via PEER_INFO
         std::atomic<uint64_t>    last_seen{0}; // FIX1: atomic — written by N workers
     };
 
@@ -485,6 +494,7 @@ struct Server {
         c.pub_addr  = from;
         c.vpn_ip    = r->vpn_ip;
         c.node_id   = r->node_id;
+        c.nat_delta = r->nat_delta;
         c.last_seen = now_ms();
         by_vpn[r->vpn_ip] = r->node_id;
 
@@ -512,6 +522,7 @@ struct Server {
                 RegPkt p1{};
                 p1.type = MSG_PEER_INFO; p1.node_id = c.node_id;
                 p1.vpn_ip = c.vpn_ip;   p1.udp_port = c.pub_addr.sin_port;
+                p1.nat_delta = c.nat_delta;
                 memcpy(p1.public_ip, &c.pub_addr.sin_addr, 4);
                 to_send.push_back({p1, ce.pub_addr});
             }
@@ -520,6 +531,7 @@ struct Server {
             RegPkt p2{};
             p2.type = MSG_PEER_INFO; p2.node_id = ce.node_id;
             p2.vpn_ip = ce.vpn_ip;  p2.udp_port = ce.pub_addr.sin_port;
+            p2.nat_delta = ce.nat_delta;
             memcpy(p2.public_ip, &ce.pub_addr.sin_addr, 4);
             to_send.push_back({p2, from});
         }
@@ -1096,6 +1108,140 @@ bool p2p_is_private_ipv4(uint32_t be_addr) {
            ((h & 0xFFFF0000) == 0xA9FE0000);       // 169.254.0.0/16 (link-local)
 }
 
+// ── STUN + symmetric-NAT port-prediction helpers ─────────────────────────────
+// Shared by BOTH P2P paths: `--mode client --comm p2p` (server-as-peer —
+// the server introduces two clients via PEER_INFO, then they punch direct)
+// and `--mode decentralized` (no server — peers exchange hand-copied
+// tokens instead). Living here, above Client, lets Client::do_register()
+// call p2p_detect_nat_delta() too, so the server-introduced P2P path gets
+// the same wide/common-port punch prediction as decentralized mode — see
+// RegPkt::nat_delta below and on_peer_info()/on_punch's use of it.
+#define P2P_MAGIC_COOKIE 0x2112A442
+#define P2P_STUN_SERVER_IP "74.125.250.129" // stun.l.google.com, one of several A records
+#define P2P_STUN_SERVER_PORT 19302
+
+// Best-effort local (LAN-facing) IPv4 address, for the hairpin-NAT fallback
+// above. UDP connect() just picks a route/source address via the routing
+// table — no packet is actually sent to 8.8.8.8.
+std::string p2p_get_local_ip() {
+    int s = (int)socket(AF_INET, SOCK_DGRAM, 0);
+    if (s < 0) return "";
+    sockaddr_in remote{};
+    remote.sin_family = AF_INET;
+    remote.sin_port   = htons(53);
+    remote.sin_addr.s_addr = inet_addr("8.8.8.8");
+    if (connect(s, (sockaddr*)&remote, sizeof(remote)) != 0) { CLOSESOCK(s); return ""; }
+    sockaddr_in local{};
+    socklen_t len = sizeof(local);
+    if (getsockname(s, (sockaddr*)&local, &len) != 0) { CLOSESOCK(s); return ""; }
+    CLOSESOCK(s);
+    char buf[INET_ADDRSTRLEN];
+    if (!inet_ntop(AF_INET, &local.sin_addr, buf, sizeof(buf))) return "";
+    return std::string(buf);
+}
+
+bool p2p_parse_stun_response(const uint8_t* resp, size_t len, std::string& ip_out, uint16_t& port_out) {
+    if (len < 20) return false;
+    size_t pos = 20;
+    while (pos + 4 <= len) {
+        uint16_t type = ntohs(*(uint16_t*)(resp + pos));
+        uint16_t length = ntohs(*(uint16_t*)(resp + pos + 2));
+        if (pos + 4 + length > len) break;
+        if (type == 0x0020 && length >= 8) { // XOR-MAPPED-ADDRESS
+            const uint8_t* value = resp + pos + 4;
+            if (value[1] != 0x01) return false; // IPv4 family
+            uint16_t xport = ntohs(*(uint16_t*)(value + 2)) ^ (P2P_MAGIC_COOKIE >> 16);
+            uint32_t xip = ntohl(*(uint32_t*)(value + 4)) ^ P2P_MAGIC_COOKIE;
+            struct in_addr addr;
+            addr.s_addr = htonl(xip);
+            char ip[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &addr, ip, sizeof(ip));
+            ip_out = ip;
+            port_out = xport;
+            return true;
+        }
+        pos += 4 + length;
+    }
+    return false;
+}
+
+bool p2p_get_public_address(std::string& ip_out, uint16_t& port_out, int sock) {
+    struct sockaddr_in stun_addr{};
+    stun_addr.sin_family = AF_INET;
+    stun_addr.sin_port = htons(P2P_STUN_SERVER_PORT);
+    inet_pton(AF_INET, P2P_STUN_SERVER_IP, &stun_addr.sin_addr);
+
+    uint8_t req[20] = {0};
+    req[0] = 0x00; req[1] = 0x01; // Binding Request
+    req[4] = (P2P_MAGIC_COOKIE >> 24) & 0xFF;
+    req[5] = (P2P_MAGIC_COOKIE >> 16) & 0xFF;
+    req[6] = (P2P_MAGIC_COOKIE >> 8) & 0xFF;
+    req[7] = P2P_MAGIC_COOKIE & 0xFF;
+
+    if (sendto(sock, (const char*)req, sizeof(req), 0, (sockaddr*)&stun_addr, sizeof(stun_addr)) < 0) {
+        perror("sendto STUN");
+        return false;
+    }
+
+    // `sock` may be non-blocking (open_udp() defaults to that), so wait for
+    // the response with poll() instead of assuming a blocking recvfrom —
+    // this also gives the STUN query a real timeout instead of hanging
+    // forever if the server never answers.
+    pollfd pfd{}; pfd.fd = (decltype(pfd.fd))sock; pfd.events = POLLIN;
+    if (poll(&pfd, 1, 3000) <= 0 || !(pfd.revents & POLLIN)) {
+        fprintf(stderr, "STUN request timed out\n");
+        return false;
+    }
+
+    uint8_t resp[512];
+    struct sockaddr_in from{};
+    socklen_t from_len = sizeof(from);
+    ssize_t n = recvfrom(sock, (char*)resp, sizeof(resp), 0, (sockaddr*)&from, &from_len);
+    if (n <= 0) {
+        perror("recvfrom STUN");
+        return false;
+    }
+
+    return p2p_parse_stun_response(resp, n, ip_out, port_out);
+}
+
+// Detect whether THIS host's NAT allocates external UDP ports in a
+// predictable sequence. Many "symmetric" NATs (common on carrier/mobile
+// and some CGNATs) hand out a *different* external port per destination
+// instead of reusing the one the local socket is bound to — which is
+// exactly why plain ±8 port-prediction (and matching the token's bound
+// local port at all) can fail completely, as seen when one side's local
+// bind of 51001 came back from STUN as external port 15502 with no
+// relation to 51001.
+//
+// We can't ask the NAT directly, but we CAN measure it: open two more
+// throwaway sockets on two adjacent local ports and ask the STUN server
+// what external port each gets. If the NAT's allocator is sequential
+// (most are, even when the base offset is unpredictable), the external
+// ports differ by a roughly fixed amount — that amount is what the OTHER
+// peer needs to fan its guesses out by, so we ship it to them in our
+// token (decentralized mode) or REGISTER packet (server-as-peer mode).
+// Returns 0 if undetectable (STUN failed, or the public IP itself changed
+// between queries, meaning the measurement isn't trustworthy).
+int p2p_detect_nat_delta(uint16_t base_local_port) {
+    uint16_t lp1 = (uint16_t)(base_local_port + 111);
+    uint16_t lp2 = (uint16_t)(base_local_port + 112);
+    int s1 = -1, s2 = -1;
+    bool ok = true;
+    try { s1 = open_udp(lp1, true); } catch (...) { ok = false; }
+    if (ok) { try { s2 = open_udp(lp2, true); } catch (...) { ok = false; } }
+
+    std::string ip1, ip2; uint16_t ext1 = 0, ext2 = 0;
+    if (ok) ok = p2p_get_public_address(ip1, ext1, s1) &&
+                 p2p_get_public_address(ip2, ext2, s2);
+
+    if (s1 >= 0) CLOSESOCK(s1);
+    if (s2 >= 0) CLOSESOCK(s2);
+
+    if (!ok || ip1.empty() || ip1 != ip2) return 0;
+    return (int)ext2 - (int)ext1;
+}
+
 // ============================================================================
 // CLIENT — TUN + VPN IP, relay or P2P comm mode
 // ============================================================================
@@ -1130,6 +1276,10 @@ struct Client {
     CommMode    comm;
     bool        enc_on;
     sockaddr_in srv{};
+    int         nat_delta = 0; // our own measured symmetric-NAT port step,
+                                // sent in every REGISTER (0 = none/unknown
+                                // or RELAY mode, where it's never measured —
+                                // see main()'s client setup)
 
     // FDs
     int tun_fd   = -1;
@@ -1326,6 +1476,7 @@ struct Client {
         RegPkt p{}; p.type = MSG_REGISTER;
         p.node_id = my_node; p.vpn_ip = my_vpn;
         p.udp_port = htons(local_port);
+        p.nat_delta = nat_delta;
         usend(udp_fd, &p, sizeof(p), srv);
         t_reg = now_ms();
     }
@@ -1344,6 +1495,7 @@ struct Client {
         p.addr.sin_family= AF_INET;
         p.addr.sin_port  = r->udp_port; // already BE
         memcpy(&p.addr.sin_addr, r->public_ip, 4);
+        p.nat_delta      = r->nat_delta; // see tick_p2p()'s wide-prediction probes
         vpn_to_node[r->vpn_ip] = r->node_id;
 
         char ip[INET_ADDRSTRLEN];
@@ -1935,131 +2087,6 @@ struct Client {
 // own public IP from inside the same LAN never make the round trip back
 // in. tick_p2p() punches both candidates; whichever answers first wins.
 // =============================================================================
-#define P2P_MAGIC_COOKIE 0x2112A442
-#define P2P_STUN_SERVER_IP "74.125.250.129" // stun.l.google.com, one of several A records
-#define P2P_STUN_SERVER_PORT 19302
-
-// Best-effort local (LAN-facing) IPv4 address, for the hairpin-NAT fallback
-// above. UDP connect() just picks a route/source address via the routing
-// table — no packet is actually sent to 8.8.8.8.
-std::string p2p_get_local_ip() {
-    int s = (int)socket(AF_INET, SOCK_DGRAM, 0);
-    if (s < 0) return "";
-    sockaddr_in remote{};
-    remote.sin_family = AF_INET;
-    remote.sin_port   = htons(53);
-    remote.sin_addr.s_addr = inet_addr("8.8.8.8");
-    if (connect(s, (sockaddr*)&remote, sizeof(remote)) != 0) { CLOSESOCK(s); return ""; }
-    sockaddr_in local{};
-    socklen_t len = sizeof(local);
-    if (getsockname(s, (sockaddr*)&local, &len) != 0) { CLOSESOCK(s); return ""; }
-    CLOSESOCK(s);
-    char buf[INET_ADDRSTRLEN];
-    if (!inet_ntop(AF_INET, &local.sin_addr, buf, sizeof(buf))) return "";
-    return std::string(buf);
-}
-
-bool p2p_parse_stun_response(const uint8_t* resp, size_t len, std::string& ip_out, uint16_t& port_out) {
-    if (len < 20) return false;
-    size_t pos = 20;
-    while (pos + 4 <= len) {
-        uint16_t type = ntohs(*(uint16_t*)(resp + pos));
-        uint16_t length = ntohs(*(uint16_t*)(resp + pos + 2));
-        if (pos + 4 + length > len) break;
-        if (type == 0x0020 && length >= 8) { // XOR-MAPPED-ADDRESS
-            const uint8_t* value = resp + pos + 4;
-            if (value[1] != 0x01) return false; // IPv4 family
-            uint16_t xport = ntohs(*(uint16_t*)(value + 2)) ^ (P2P_MAGIC_COOKIE >> 16);
-            uint32_t xip = ntohl(*(uint32_t*)(value + 4)) ^ P2P_MAGIC_COOKIE;
-            struct in_addr addr;
-            addr.s_addr = htonl(xip);
-            char ip[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &addr, ip, sizeof(ip));
-            ip_out = ip;
-            port_out = xport;
-            return true;
-        }
-        pos += 4 + length;
-    }
-    return false;
-}
-
-bool p2p_get_public_address(std::string& ip_out, uint16_t& port_out, int sock) {
-    struct sockaddr_in stun_addr{};
-    stun_addr.sin_family = AF_INET;
-    stun_addr.sin_port = htons(P2P_STUN_SERVER_PORT);
-    inet_pton(AF_INET, P2P_STUN_SERVER_IP, &stun_addr.sin_addr);
-
-    uint8_t req[20] = {0};
-    req[0] = 0x00; req[1] = 0x01; // Binding Request
-    req[4] = (P2P_MAGIC_COOKIE >> 24) & 0xFF;
-    req[5] = (P2P_MAGIC_COOKIE >> 16) & 0xFF;
-    req[6] = (P2P_MAGIC_COOKIE >> 8) & 0xFF;
-    req[7] = P2P_MAGIC_COOKIE & 0xFF;
-
-    if (sendto(sock, (const char*)req, sizeof(req), 0, (sockaddr*)&stun_addr, sizeof(stun_addr)) < 0) {
-        perror("sendto STUN");
-        return false;
-    }
-
-    // `sock` may be non-blocking (open_udp() defaults to that), so wait for
-    // the response with poll() instead of assuming a blocking recvfrom —
-    // this also gives the STUN query a real timeout instead of hanging
-    // forever if the server never answers.
-    pollfd pfd{}; pfd.fd = (decltype(pfd.fd))sock; pfd.events = POLLIN;
-    if (poll(&pfd, 1, 3000) <= 0 || !(pfd.revents & POLLIN)) {
-        fprintf(stderr, "STUN request timed out\n");
-        return false;
-    }
-
-    uint8_t resp[512];
-    struct sockaddr_in from{};
-    socklen_t from_len = sizeof(from);
-    ssize_t n = recvfrom(sock, (char*)resp, sizeof(resp), 0, (sockaddr*)&from, &from_len);
-    if (n <= 0) {
-        perror("recvfrom STUN");
-        return false;
-    }
-
-    return p2p_parse_stun_response(resp, n, ip_out, port_out);
-}
-
-// Detect whether THIS host's NAT allocates external UDP ports in a
-// predictable sequence. Many "symmetric" NATs (common on carrier/mobile
-// and some CGNATs) hand out a *different* external port per destination
-// instead of reusing the one the local socket is bound to — which is
-// exactly why plain ±8 port-prediction (and matching the token's bound
-// local port at all) can fail completely, as seen when one side's local
-// bind of 51001 came back from STUN as external port 15502 with no
-// relation to 51001.
-//
-// We can't ask the NAT directly, but we CAN measure it: open two more
-// throwaway sockets on two adjacent local ports and ask the STUN server
-// what external port each gets. If the NAT's allocator is sequential
-// (most are, even when the base offset is unpredictable), the external
-// ports differ by a roughly fixed amount — that amount is what the OTHER
-// peer needs to fan its guesses out by, so we ship it to them in our
-// token. Returns 0 if undetectable (STUN failed, or the public IP itself
-// changed between queries, meaning the measurement isn't trustworthy).
-int p2p_detect_nat_delta(uint16_t base_local_port) {
-    uint16_t lp1 = (uint16_t)(base_local_port + 111);
-    uint16_t lp2 = (uint16_t)(base_local_port + 112);
-    int s1 = -1, s2 = -1;
-    bool ok = true;
-    try { s1 = open_udp(lp1, true); } catch (...) { ok = false; }
-    if (ok) { try { s2 = open_udp(lp2, true); } catch (...) { ok = false; } }
-
-    std::string ip1, ip2; uint16_t ext1 = 0, ext2 = 0;
-    if (ok) ok = p2p_get_public_address(ip1, ext1, s1) &&
-                 p2p_get_public_address(ip2, ext2, s2);
-
-    if (s1 >= 0) CLOSESOCK(s1);
-    if (s2 >= 0) CLOSESOCK(s2);
-
-    if (!ok || ip1.empty() || ip1 != ip2) return 0;
-    return (int)ext2 - (int)ext1;
-}
-
 // Token codec: base64("id,ip,port,vpn_ip,node_id") — a compact,
 // copy-pasteable string a person hands their peer directly (chat, email,
 // voice), instead of a rendezvous server sending PEER_INFO.
@@ -2683,6 +2710,19 @@ int main(int argc, char* argv[]) {
                 throw std::runtime_error("Invalid server IP: " + server_ip);
 
             cli.udp_fd = open_udp(client_port, true);
+
+            // Same symmetric-NAT measurement decentralized mode does (see
+            // p2p_detect_nat_delta()'s comment) — only worth the extra
+            // STUN round trips when we'll actually attempt direct P2P
+            // punching. RELAY-mode clients never punch, so skip it there.
+            if (cm == CommMode::P2P) {
+                cli.nat_delta = p2p_detect_nat_delta(client_port);
+                if (cli.nat_delta != 0)
+                    printf("[P2P] Our NAT allocates ports in steps of %d — "
+                           "sharing that via REGISTER so peers can punch wide if needed\n",
+                           cli.nat_delta);
+            }
+
             cli.setup_tun(vpn_ip.c_str(), subnet, mtu);
             cli.setup_epoll();
             cli.run();

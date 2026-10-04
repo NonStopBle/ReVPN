@@ -555,42 +555,67 @@ single learned port, no matter how long you retry — which is exactly why
 the log above just repeats the same timeout/retry cycle forever instead of
 eventually succeeding.
 
-**The fix — measure and predict the NAT's port step.** Most symmetric NATs
-aren't *random* about the external port they hand out — they allocate
-sequentially (each new UDP mapping gets the previous external port +
-some fixed step). ReVPN now measures its own NAT's step at startup:
+**The fix — measure and predict the NAT's port step, in EVERY P2P mode.**
+Most symmetric NATs aren't *random* about the external port they hand
+out — they allocate sequentially (each new UDP mapping gets the previous
+external port + some fixed step). ReVPN measures its own NAT's step at
+startup, and this is **not** decentralized-only — it runs for both P2P
+paths:
+
+- `--mode decentralized` (no server — hand-copied tokens)
+- `--mode client --comm p2p` (server-as-peer — the server introduces two
+  clients via `PEER_INFO`, then they punch direct)
+
+The helper (`p2p_detect_nat_delta()` in `engine/meshvpn.cpp`) lives above
+both the `Server`/`Client` structs and the decentralized-mode code so
+either path can call it:
 
 1. On top of the main socket, it opens two more throwaway UDP sockets on
    two adjacent local ports and asks the public STUN server (Google's)
-   what external port each one gets back (`p2p_detect_nat_delta()` in
-   `engine/meshvpn.cpp`).
+   what external port each one gets back.
 2. The difference between those two external ports is the NAT's
    per-mapping port step. If both STUN replies come back with the *same*
    public IP (confirming it's one stable NAT, not a flaky/changing path),
    that step is trustworthy.
-3. That step is embedded as an extra field in the token you hand your
-   peer (`id,pub_ip,pub_port,vpn_ip,node_id,lan_ip,lan_port,nat_delta`,
-   base64-encoded — same token, one more number).
-4. When a peer receives a token carrying a nonzero `nat_delta`, it no
-   longer just tries the exact reported port ±8 — it also fans out 40
-   extra punch probes at multiples of that step (`±1×`, `±2×`, ... `±20×`
-   the step) around the reported port. One of those guesses lands on the
-   real external port the symmetric NAT will actually use for this
-   peer-to-peer conversation, and the handshake completes.
+3. That step then travels to the other side over whichever channel that
+   mode already uses to exchange addresses:
+   - **Decentralized**: embedded as an extra field in the token you hand
+     your peer (`id,pub_ip,pub_port,vpn_ip,node_id,lan_ip,lan_port,nat_delta`,
+     base64-encoded — same token, one more number).
+   - **Server-as-peer**: embedded as a new `nat_delta` field in the
+     `REGISTER` packet sent to the server, which the server relays
+     straight through inside the `PEER_INFO` packets it forwards to every
+     other client — no new round trip, no protocol version bump (it's
+     carved out of what used to be unused padding bytes, so an older
+     unpatched peer in the mesh still sends `0` there, which just means
+     "unknown", same as always).
+4. Either way, once a peer has a nonzero `nat_delta` for someone it's
+   punching toward, it no longer just tries the exact reported port ±8 —
+   it also fans out 40 extra punch probes at multiples of that step
+   (`±1×`, `±2×`, ... `±20×` the step) around the reported port. One of
+   those guesses lands on the real external port the symmetric NAT will
+   actually use for this peer-to-peer conversation, and the handshake
+   completes.
 
-At startup you'll see this reported directly:
+At startup you'll see this reported directly, with the exact wording
+depending on which mode you're in:
 
 ```
 [Decentralized] NAT allocates ports in steps of 37 — sharing that with peers so they can punch wide if needed
+[P2P] Our NAT allocates ports in steps of 37 — sharing that via REGISTER so peers can punch wide if needed
 ```
 
 If the step can't be measured (STUN fails, or the public IP differs
 between the two probe sockets — meaning the path itself is unstable, not
 just the NAT), `nat_delta` is sent as `0` and ReVPN silently falls back to
 the plain ±8 search it always had, then relay fallback if that still
-doesn't connect. Old tokens from before this change still parse fine (the
-field is optional) — there's nothing to re-exchange on the other side of
-an upgrade except a fresh token.
+doesn't connect. In server-as-peer mode this measurement only runs for
+`--comm p2p` clients — plain `--comm relay` clients never punch, so there's
+no reason to spend the extra STUN round trips. Old decentralized tokens
+and old `REGISTER` packets from before this change still parse/decode
+fine (the field is optional on the wire either way) — there's nothing to
+re-exchange on the other side of an upgrade except a fresh token, or just
+restarting an old client against a new server/peer.
 
 **What this doesn't fix:** a NAT that allocates external ports *truly*
 randomly per destination (no fixed step at all) can't be predicted by any
