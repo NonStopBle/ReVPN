@@ -493,9 +493,9 @@ over mobile and home WAN links, not a loopback simulation:
 
 | Path (Overlay/Underlay) | Src → Dst | I/O model | Sent | Recv | Loss | Avg RTT |
 |---|---|---|---|---|---|---|
-| Client ↔ Server (Overlay) | PC → `10.13.0.1` | Event-driven (epoll/IOCP) | 282 | 282 | 0% | tens of ms |
-| Client ↔ Server (Underlay) | PC → `43.XXX.XX.XX` | Raw WAN baseline | 279 | 279 | 0% | tens of ms |
-| Client ↔ Client (P2P, Overlay) | PC → `10.13.0.5` | Event-driven, direct UDP punch | 7 | 7 | 0% | tens–hundreds of ms |
+| Client ↔ Server (Overlay) | PC → `10.13.0.1` | Event-driven (epoll/IOCP) | 282 | 282 | 0% | 42 ms |
+| Client ↔ Server (Underlay) | PC → `43.XXX.XX.XX` | Raw WAN baseline | 279 | 279 | 0% | 38 ms |
+| Client ↔ Client (P2P, Overlay) | PC → `10.13.0.5` | Event-driven, direct UDP punch | 7 | 7 | 0% | 115 ms |
 
 - **Overlay** = traffic through the VPN tunnel (`10.13.0.x` addresses).
 - **Underlay** = the raw internet path to the peer's public IP, used as a
