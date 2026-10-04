@@ -252,20 +252,36 @@ once you know the config you want to run for real. Run
 Two options:
 
 - **No Python needed:** run the prebuilt engine directly, or with the
-  bundled menu wrapper — `ReVPN.bat` (server fully works; client needs
-  Wintun, see below), or
+  bundled menu wrapper — `ReVPN.bat` (server fully works; client and
+  decentralized mode need Wintun, see below), or
   `ReVPN-engine.exe --mode server --bind 0.0.0.0:9000`.
 - **Full menu, like the Linux version:** install the Python version and
   run `ReVPN` (see `python/README.md`) — this one also has the
   interactive menu.
 
-Windows can run the **server** fully today. The **client** loads
-[Wintun](https://www.wintun.net/) dynamically at startup — download
-`wintun.dll` and place it next to `ReVPN-engine.exe`, then run as
-Administrator. This path is untested on real Windows hardware (built
-and run so far only under Wine, which has no Wintun driver to actually
-exercise it against) — if it doesn't work, fall back to the Linux
-client, WSL, or ReVPN-py's independent Wintun backend.
+First run `install.bat` (double-click it, or run from `cmd`/PowerShell).
+It checks that `build-windows\ReVPN-engine.exe` exists, downloads
+`wintun.dll` for your CPU architecture straight from
+[wintun.net](https://www.wintun.net/) into `build-windows\` next to the
+engine, and checks whether Python is on `PATH` (only needed for
+`python\ReVPN.py`). Run it again any time; it skips the download if
+`wintun.dll` is already there.
+
+`ReVPN.bat` supports all three modes — `--server`, `--client`, and
+`--decentralized` — through the same interactive menu or flags as the
+Linux `ReVPN.sh` (see [Step 8](#step-8--decentralized-mode-no-server-at-all)
+for what decentralized mode is). There's no `--stress` in the batch
+version; use `python\ReVPN.py --stress` for that.
+
+Windows can run the **server** fully today. The **client** and
+**decentralized** modes load [Wintun](https://www.wintun.net/)
+dynamically at startup — `install.bat` fetches `wintun.dll` for you
+(or download it yourself and place it next to `ReVPN-engine.exe`),
+then run as Administrator. This path is untested on real Windows
+hardware (built and run so far only under Wine, which has no Wintun
+driver to actually exercise it against) — if it doesn't work, fall
+back to the Linux client, WSL, or ReVPN-py's independent Wintun
+backend.
 
 ---
 
@@ -389,6 +405,10 @@ packet loss) so you can sanity-check a server before depending on it.
 ## What's in this folder
 
 - `ReVPN.sh` — the command you run (also opens the menu with no arguments)
+- `ReVPN.bat` — the Windows equivalent, wrapping `build-windows\ReVPN-engine.exe`
+  (same `--server`/`--client`/`--decentralized` modes, plain-text menu)
+- `install.bat` — run once on Windows to fetch `wintun.dll` (needed by
+  `ReVPN.bat --client`/`--decentralized`) and sanity-check the engine binary
 - `python/` — a Python version of the same tool, for Windows and anyone
   who'd rather not compile C++ (see `python/README.md`)
 - `config/` — example settings files (`--config path/to/file.yaml`)
@@ -515,6 +535,7 @@ There are **two** separate Windows binaries:
 | Has the interactive menu?  | Via `ReVPN.bat` (plain text menu)                            | Yes — same curses menu as Linux                     |
 | `--server`                 | Full C++ engine (recvmmsg-class throughput)                  | Pure-Python server                                  |
 | `--client` / TUN           | Own Wintun integration (dynamically loaded `wintun.dll`), unverified on real hardware | Independent Wintun backend, unverified on real hardware |
+| `--decentralized`          | Supported via `ReVPN.bat --decentralized` (same Wintun dependency as `--client`) | Not exposed on the Windows build                    |
 | Server-as-peer (`--vpn-ip`)| Linux only — fails cleanly on Windows with a clear message    | Not exposed on the Windows build                    |
 | Stress test                | Via the bash `ReVPN.sh --stress` wrapper, not the raw .exe       | Built in (`--stress`, or from the menu)             |
 
@@ -522,7 +543,9 @@ Build them with `./build_windows.sh` (needs
 `g++-mingw-w64-x86-64-posix binutils-mingw-w64-x86-64`) and
 `cd python && ./build_windows_exe.sh` (needs `wine`; downloads a
 Windows Python + PyInstaller into a dedicated Wine prefix on first
-run) respectively.
+run) respectively. After building (or grabbing a prebuilt
+`ReVPN-engine.exe`), run `install.bat` once to fetch `wintun.dll` for
+`--client`/`--decentralized`.
 
 **What's actually been tested (all under Wine — no real Windows
 hardware was available):**
@@ -565,6 +588,8 @@ hardware was available):**
   `build/ReVPN-engine` (Linux) or `build-windows/ReVPN-engine.exe`
   (MinGW cross-compile).
 - `ReVPN.sh` — the CLI + TUI wrapper end users run.
+- `ReVPN.bat` / `install.bat` — the Windows CLI + menu wrapper and its
+  dependency installer (fetches `wintun.dll`).
 - `stress_test.sh` / `tools/stress_client.py` — the load-test harness.
 - `config/` — example `server.yaml` / `client.yaml` for `--config`.
 - `python/` — `ReVPN-py`: a pure-Python, wire-compatible port of this
