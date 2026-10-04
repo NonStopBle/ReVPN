@@ -509,6 +509,95 @@ over mobile and home WAN links, not a loopback simulation:
   **direct** between peers (`[P2P] OK DIRECT ...`) rather than relayed
   through the server — see [Step 8](#step-8--decentralized-mode-no-server-at-all).
 
+### Deep dive: when decentralized P2P punching fails ("TX climbs, RX stays 0")
+
+Real-world case that came up testing two peers on different networks, both
+stuck forever at:
+
+```
+[Status] 0x0902DC4C:PUNCHING  TX:48  RX:0
+[P2P] WARN Punch timeout vpn=10.13.0.10  (11 attempts, 10s) → relay fallback. Press 'f' to retry.
+[Decentralized] Retrying punch to 0x0902DC4C...
+```
+
+on **both** sides, repeating forever — packets are being sent, nothing is
+coming back. Here's what was actually happening and how it's handled now.
+
+**The root cause — symmetric NAT.** Compare the two peers' startup logs:
+
+```
+# Peer "me":    bound locally to :51001  →  STUN reports public 183.89.6.251:51001   (port preserved)
+# Peer "mexfa":  bound locally to :51001  →  STUN reports public 49.237.68.251:15502  (port REMAPPED)
+```
+
+Peer "me" is behind a NAT that preserves the local port — port 51001 in,
+port 51001 out. Totally normal, hole punching works fine against this kind
+of NAT. Peer "mexfa" is behind a **symmetric NAT** (very common on mobile
+carrier/CGNAT networks): its router hands out a *different* external port
+for every new UDP destination it talks to. The port `15502` it got back
+from the STUN server has nothing to do with the port the other peer's
+packets will actually land on — that mapping was created specifically for
+talking to the STUN server, not for talking to peer "me". So:
+
+- "me" → "mexfa": punches go to `49.237.68.251:15502`, which is the wrong
+  door — mexfa's NAT only forwards packets on that port if they're coming
+  from the STUN server's IP. They get silently dropped. RX stays 0 forever.
+- "mexfa" → "me": these can land fine (me's NAT is port-preserving), but
+  since "me"'s punches never arrive at the right door, the handshake never
+  completes in either direction — a hole punch needs packets flowing both
+  ways to lock in.
+
+This is a fundamental limit of plain STUN-based hole punching: it only
+reliably works when **at least one side** is behind a full-cone or
+restricted-cone NAT. Two symmetric NATs (or one symmetric NAT whose
+mapping is genuinely random per-destination) can't be punched with a
+single learned port, no matter how long you retry — which is exactly why
+the log above just repeats the same timeout/retry cycle forever instead of
+eventually succeeding.
+
+**The fix — measure and predict the NAT's port step.** Most symmetric NATs
+aren't *random* about the external port they hand out — they allocate
+sequentially (each new UDP mapping gets the previous external port +
+some fixed step). ReVPN now measures its own NAT's step at startup:
+
+1. On top of the main socket, it opens two more throwaway UDP sockets on
+   two adjacent local ports and asks the public STUN server (Google's)
+   what external port each one gets back (`p2p_detect_nat_delta()` in
+   `engine/meshvpn.cpp`).
+2. The difference between those two external ports is the NAT's
+   per-mapping port step. If both STUN replies come back with the *same*
+   public IP (confirming it's one stable NAT, not a flaky/changing path),
+   that step is trustworthy.
+3. That step is embedded as an extra field in the token you hand your
+   peer (`id,pub_ip,pub_port,vpn_ip,node_id,lan_ip,lan_port,nat_delta`,
+   base64-encoded — same token, one more number).
+4. When a peer receives a token carrying a nonzero `nat_delta`, it no
+   longer just tries the exact reported port ±8 — it also fans out 40
+   extra punch probes at multiples of that step (`±1×`, `±2×`, ... `±20×`
+   the step) around the reported port. One of those guesses lands on the
+   real external port the symmetric NAT will actually use for this
+   peer-to-peer conversation, and the handshake completes.
+
+At startup you'll see this reported directly:
+
+```
+[Decentralized] NAT allocates ports in steps of 37 — sharing that with peers so they can punch wide if needed
+```
+
+If the step can't be measured (STUN fails, or the public IP differs
+between the two probe sockets — meaning the path itself is unstable, not
+just the NAT), `nat_delta` is sent as `0` and ReVPN silently falls back to
+the plain ±8 search it always had, then relay fallback if that still
+doesn't connect. Old tokens from before this change still parse fine (the
+field is optional) — there's nothing to re-exchange on the other side of
+an upgrade except a fresh token.
+
+**What this doesn't fix:** a NAT that allocates external ports *truly*
+randomly per destination (no fixed step at all) can't be predicted by any
+amount of guessing — only full TURN-style relaying through a third host
+works there. For ReVPN that's exactly what `--relay-fallback` already
+does, automatically, after the punch attempts above are exhausted.
+
 ---
 
 ## What's in this folder
