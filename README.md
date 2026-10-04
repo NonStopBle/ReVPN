@@ -485,8 +485,20 @@ since nothing survives the exchange by default. `--session <file>`
 fixes that:
 
 ```sh
+# Linux
 ./ReVPN.sh --decentralized --id alice --vpn-ip 10.13.0.2 --session ./config/alice.session
 ```
+
+```bat
+:: Windows
+ReVPN.bat --decentralized --id alice --vpn-ip 10.13.0.2 --session config\alice.session
+```
+
+Both wrappers also ask about this in their interactive menu (the TUI for
+`ReVPN.sh`, the plain `set /p` form for `ReVPN.bat`) — a y/N prompt that
+defaults to **off**, offering `config/session-<id>.token` as the suggested
+path if you say yes. Either way it's the same `--session <file>` flag
+underneath, forwarded straight to the engine.
 
 - First run: exchanges tokens as normal (paste or `--peer-token`), then
   **saves** them to `alice.session`, `chmod 600`.
