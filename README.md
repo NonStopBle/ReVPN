@@ -438,6 +438,16 @@ mutually-reachable network — sharing the same *public* IP (e.g. both
 behind the same CGNAT/mobile carrier) doesn't necessarily mean a direct
 private route exists between them.
 
+**Once `DIRECT`, the locked address stays locked** — it no longer gets
+re-picked on every ACK (the one exception is a one-time public→private
+upgrade). Some NATs, phone hotspots especially, can answer for the same
+peer from more than one private-looking address; re-locking onto a
+"newer" one mid-session forces the far end's NAT to re-map its state,
+which drops/delays whatever was in flight during the switch. If you see
+heavy packet loss and wild jitter *through the tunnel* while a plain
+`ping` to the peer's real IP outside the tunnel is clean, that address
+flapping was almost certainly the cause.
+
 **MTU:** the TUN MTU defaults to 1380, chosen to survive typical internet
 paths (PPPoE and other overhead-heavy links often can't do a full 1500
 end-to-end, and ReVPN doesn't fragment — an oversized packet just gets

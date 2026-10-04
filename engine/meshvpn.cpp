@@ -1378,25 +1378,30 @@ struct Client {
             if (nid == sender_nid || peer_key == from_key)
             {
                 bool was_direct = p.direct();
-
-                // Prefer the LAN candidate over the public/hairpin one and,
-                // once locked onto it, don't let a later (slower) public ACK
-                // win the race and downgrade us back onto it — both get
-                // punched every tick, so without this the final address is
-                // just whichever ACK happens to land last, and that's often
-                // the public one even when both peers are on the same LAN.
-                //
-                // Checked generically (any private/CGNAT range), not just
-                // "does it match the exact LAN candidate we exchanged" —
-                // behind some NATs (e.g. two peers sharing a phone hotspot)
-                // the address that actually works is a third one neither
-                // side declared, translated by an intermediate hop, but
-                // it's still a private address and still worth preferring.
                 bool new_is_lan = p2p_is_private_ipv4(from.sin_addr.s_addr);
-                bool cur_is_lan = was_direct && p2p_is_private_ipv4(p.addr.sin_addr.s_addr);
 
-                if (!(cur_is_lan && !new_is_lan))
-                    p.addr = from; // adopt private unconditionally, public only if not already on one
+                if (!was_direct) {
+                    // First lock-in (or re-establishing after a real drop):
+                    // both the public and private candidates get punched
+                    // every tick, so whichever ACK wins this race becomes
+                    // the address — and it tends to be the private one,
+                    // since it's physically closer.
+                    p.addr = from;
+                } else {
+                    // Already DIRECT and apparently healthy: don't let a
+                    // stray/duplicate ACK from a *different* source address
+                    // reroute us, even a private one. Some NATs (phone
+                    // hotspots bridging a tether + Wi-Fi segment) can answer
+                    // from more than one private-looking address for the
+                    // same peer, and re-locking onto a "new" one forces the
+                    // far end to re-map its NAT state mid-stream — which is
+                    // exactly what drops/delays packets in flight during
+                    // the switch. The one exception: a genuine upgrade from
+                    // the public/hairpin address to a private one, taken
+                    // once, since that's a real win worth the one-time cost.
+                    bool cur_is_lan = p2p_is_private_ipv4(p.addr.sin_addr.s_addr);
+                    if (new_is_lan && !cur_is_lan) p.addr = from;
+                }
 
                 p.st      = P2PSt::DIRECT;
                 p.t_p2prx = now_ms();
