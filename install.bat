@@ -41,7 +41,7 @@ set "WINTUN_URL=https://www.wintun.net/builds/wintun-%WINTUN_VERSION%.zip"
 set "TMP_ZIP=%TEMP%\revpn-wintun-%RANDOM%.zip"
 set "TMP_EXTRACT=%TEMP%\revpn-wintun-%RANDOM%"
 
-echo ReVPN install v1.0.1 - Windows dependency setup
+echo ReVPN install v1.0.2 - Windows dependency setup
 echo ==============================================================
 echo.
 

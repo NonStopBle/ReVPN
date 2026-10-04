@@ -30,7 +30,7 @@ REM ============================================================================
 setlocal enabledelayedexpansion
 REM Bump alongside REVPN_VERSION in engine/meshvpn.cpp so this wrapper
 REM and the engine binary it calls always report the same version.
-set "REVPN_VERSION=1.0.1"
+set "REVPN_VERSION=1.0.2"
 set "SELF_DIR=%~dp0"
 set "ENGINE=%SELF_DIR%build-windows\ReVPN-engine.exe"
 

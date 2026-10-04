@@ -6,7 +6,7 @@
 // ============================================================================
 // Version printed in the startup banner and --help — bump this on every
 // change so a test log can be matched back to the exact build it ran.
-#define REVPN_VERSION "1.0.1"
+#define REVPN_VERSION "1.0.2"
 // ============================================================================
 // Build (standard — recvmmsg):
 //   g++ -std=c++17 -O3 -pthread meshvpn.cpp -o meshvpn
