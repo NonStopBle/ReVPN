@@ -461,6 +461,27 @@ tui_pick_xdp_iface() {
     return 0
 }
 
+tui_pick_port() { # label default_port
+    local label="$1" def="$2" choice
+    choice="$(box --title "${label}: Local UDP Port" --menu \
+        "How should the local UDP port (STUN + hole punching) be chosen?" \
+        13 64 2 \
+        automatic "Let the engine pick its default (${def})" \
+        manual    "Enter a specific port yourself")" || return 1
+
+    if [[ "$choice" == "manual" ]]; then
+        local cur="$def"
+        [[ "$PORT_SET" == true ]] && cur="$PORT"
+        PORT="$(tui_input "${label}: Local UDP Port" \
+            "Local UDP port to bind/punch from\n(pick your own for a stable firewall/port-forward rule across restarts)" \
+            "$cur" 11 64)" || return 1
+        PORT_SET=true
+    else
+        PORT_SET=false
+    fi
+    return 0
+}
+
 tui_server_form() {
     PORT="$(tui_input "Server: UDP Port"     "Port to listen on"        "$PORT"    10 60)"    || return 1
     WORKERS="$(tui_input "Server: Workers"    "Worker threads"           "$WORKERS" 10 60)"    || return 1
@@ -514,15 +535,18 @@ The server if punching fails?
         RELAY_ONLY=true
     fi
 
+    tui_pick_port "Client" 51820 || return 1
+
     tui_yesno "Confirm" \
 "Join as Client:
 
-  Server   : ${CONNECT}
-  VPN IP   : ${VPN_IP}/${SUBNET}
-  Encrypt  : ${ENCRYPT}
-  Mode     : $([[ "$RELAY_ONLY" == true ]] && echo "Relay-only" || echo "P2P + auto relay fallback")
+  Server     : ${CONNECT}
+  VPN IP     : ${VPN_IP}/${SUBNET}
+  Encrypt    : ${ENCRYPT}
+  Mode       : $([[ "$RELAY_ONLY" == true ]] && echo "Relay-only" || echo "P2P + auto relay fallback")
+  Local port : $([[ "$PORT_SET" == true ]] && echo "$PORT (manual)" || echo "automatic (engine default, 51820)")
 
-Proceed?" || return 1
+Proceed?" 14 64 || return 1
     return 0
 }
 
@@ -533,12 +557,15 @@ tui_decentralized_form() {
 
     if tui_yesno "Encryption" "Encrypt tunnel traffic?"; then ENCRYPT=true; else ENCRYPT=false; fi
 
+    tui_pick_port "Decentralized" 51001 || return 1
+
     tui_yesno "Confirm" \
 "Connect directly to a peer — no server:
 
-  Your name : ${DC_ID}
-  VPN IP    : ${VPN_IP}/${SUBNET}
-  Encrypt   : ${ENCRYPT}
+  Your name  : ${DC_ID}
+  VPN IP     : ${VPN_IP}/${SUBNET}
+  Encrypt    : ${ENCRYPT}
+  Local port : $([[ "$PORT_SET" == true ]] && echo "$PORT (manual)" || echo "automatic (engine default, 51001)")
 
 Next: this will drop to a plain screen. It prints a short
 token — send that to every peer you want in the mesh (chat,
@@ -546,7 +573,7 @@ voice, ...) — then asks you to paste each peer's token back,
 one per line (blank line to finish). Everyone connects directly
 to everyone; a 2-peer link or a larger mesh both work the same way.
 
-Proceed?" 19 64 || return 1
+Proceed?" 21 64 || return 1
     return 0
 }
 

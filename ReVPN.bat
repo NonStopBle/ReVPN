@@ -161,9 +161,16 @@ set /p "ENC=Encrypt tunnel traffic? (Y/n): "
 if /i "%ENC%"=="n" (set "ENCRYPT=false") else (set "ENCRYPT=true")
 set /p "PUNCH=Try direct UDP hole punching first, auto relay fallback? (Y/n): "
 if /i "%PUNCH%"=="n" (set "RELAY_ONLY=true") else (set "RELAY_ONLY=false")
-set "CPORT_IN="
-set /p "CPORT_IN=Local UDP port for this client, e.g. to pick one consistently across restarts for firewall/port-forward rules (blank = engine default 51820): "
-if not "%CPORT_IN%"=="" (set "PORT=%CPORT_IN%" & set "PORT_SET=true")
+if /i "%PORT_SET%"=="false" set "PORT=51820"
+set /p "PORTMODE=Local UDP port - automatic (engine default 51820) or manual? (A/m): "
+if /i "%PORTMODE%"=="m" (
+    set "CPORT_IN="
+    set /p "CPORT_IN=Local UDP port to bind/punch from [%PORT%]: "
+    if not "%CPORT_IN%"=="" set "PORT=%CPORT_IN%"
+    set "PORT_SET=true"
+) else (
+    set "PORT_SET=false"
+)
 echo.
 echo Join as Client:
 echo   Server  : %CONNECT%
@@ -191,9 +198,16 @@ set /p "SUBNET_IN=VPN network prefix length [%SUBNET%]: "
 if not "%SUBNET_IN%"=="" set "SUBNET=%SUBNET_IN%"
 set /p "ENC=Encrypt tunnel traffic? (Y/n): "
 if /i "%ENC%"=="n" (set "ENCRYPT=false") else (set "ENCRYPT=true")
-set "DPORT_IN="
-set /p "DPORT_IN=Local UDP port, e.g. to pick one consistently across restarts for firewall/port-forward rules (blank = engine default 51001): "
-if not "%DPORT_IN%"=="" (set "PORT=%DPORT_IN%" & set "PORT_SET=true")
+if /i "%PORT_SET%"=="false" set "PORT=51001"
+set /p "PORTMODE=Local UDP port - automatic (engine default 51001) or manual? (A/m): "
+if /i "%PORTMODE%"=="m" (
+    set "DPORT_IN="
+    set /p "DPORT_IN=Local UDP port to bind/punch from [%PORT%]: "
+    if not "%DPORT_IN%"=="" set "PORT=%DPORT_IN%"
+    set "PORT_SET=true"
+) else (
+    set "PORT_SET=false"
+)
 echo.
 echo Connect directly to a peer - no server:
 echo   Your name : %DC_ID%
