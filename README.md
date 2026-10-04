@@ -516,8 +516,12 @@ over mobile and home WAN links, not a loopback simulation:
 - `ReVPN.sh` — the command you run (also opens the menu with no arguments)
 - `ReVPN.bat` — the Windows equivalent, wrapping `build-windows\ReVPN-engine.exe`
   (same `--server`/`--client`/`--decentralized` modes, plain-text menu)
-- `install.bat` — run once on Windows to fetch `wintun.dll` (needed by
+- `install.bat` — run once on Windows to install `wintun.dll` (needed by
   `ReVPN.bat --client`/`--decentralized`) and sanity-check the engine binary
+- `vendor/wintun/` — the [Wintun](https://www.wintun.net/) driver
+  (v0.14.1), vendored for all Windows architectures (amd64/arm64/x86/arm)
+  so `install.bat` works offline; see
+  [`vendor/wintun/CREDIT.md`](vendor/wintun/CREDIT.md) for credit/license
 - `python/` — a Python version of the same tool, for Windows and anyone
   who'd rather not compile C++ (see `python/README.md`)
 - `config/` — example settings files (`--config path/to/file.yaml`)
@@ -721,3 +725,11 @@ Created by **Rezier Labs**. Licensed under the
 and redistribute for any noncommercial purpose (personal, educational,
 research, nonprofit). Commercial use requires a separate license from
 Rezier Labs. See the [`LICENSE`](LICENSE) file for the full terms.
+
+### Third-party credit
+
+- **Wintun** — the Windows TUN driver vendored in `vendor/wintun/`,
+  © WireGuard LLC / Jason A. Donenfeld, licensed under GPLv2 (or a
+  separate commercial license from WireGuard LLC). See
+  [`vendor/wintun/CREDIT.md`](vendor/wintun/CREDIT.md) and
+  [`vendor/wintun/LICENSE.txt`](vendor/wintun/LICENSE.txt).

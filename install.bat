@@ -5,9 +5,11 @@ REM
 REM What it does:
 REM   1. Checks build-windows\ReVPN-engine.exe exists (tells you how to
 REM      build it if not - requires Linux/WSL + mingw-w64, see build_windows.sh).
-REM   2. Downloads wintun.dll (needed by --client and --decentralized) from
-REM      https://www.wintun.net/ and drops the right architecture copy next
-REM      to ReVPN-engine.exe.
+REM   2. Installs wintun.dll (needed by --client and --decentralized) from
+REM      the vendored copy in vendor\wintun\bin\<arch>\ (see
+REM      vendor\wintun\CREDIT.md for license/credit), falling back to
+REM      downloading from https://www.wintun.net/ if the vendored copy is
+REM      missing. Drops the right architecture copy next to ReVPN-engine.exe.
 REM   3. Adds Windows Firewall rules:
 REM      - inbound+outbound UDP for ReVPN-engine.exe. Without this,
 REM        Windows Firewall silently drops unsolicited inbound UDP packets
@@ -72,7 +74,16 @@ if exist "%WINTUN_DLL%" (
 
 if not exist "%ENGINE_DIR%" mkdir "%ENGINE_DIR%"
 
-echo [INFO] Downloading Wintun %WINTUN_VERSION% from %WINTUN_URL% ...
+set "VENDOR_DLL=%SELF_DIR%vendor\wintun\bin\%ARCH%\wintun.dll"
+
+if exist "%VENDOR_DLL%" (
+    echo [INFO] Using vendored Wintun %WINTUN_VERSION% ^(see vendor\wintun\CREDIT.md^) ...
+    copy /y "%VENDOR_DLL%" "%WINTUN_DLL%" >nul
+    echo [OK] Installed: %WINTUN_DLL%
+    goto FIREWALL_CHECK
+)
+
+echo [INFO] Vendored wintun.dll not found for %ARCH%, downloading %WINTUN_VERSION% from %WINTUN_URL% ...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%WINTUN_URL%' -OutFile '%TMP_ZIP%' -UseBasicParsing } catch { exit 1 }"
 if errorlevel 1 (
