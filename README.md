@@ -483,6 +483,32 @@ This throws 200 simulated clients at your server locally, no admin
 rights or second machine needed, and prints a report (throughput,
 packet loss) so you can sanity-check a server before depending on it.
 
+### Real-hardware latency results (server-as-peer + decentralized P2P)
+
+After switching both the Linux and Windows engines from fixed-interval
+polling to event-driven I/O (`epoll_wait`/`timerfd` on Linux,
+`WintunGetReadWaitEvent`/`WSAEventSelect` on Windows — see
+[Architecture](#architecture)), these numbers come from two real phones/PCs
+over mobile and home WAN links, not a loopback simulation:
+
+| Path (Overlay/Underlay) | Src → Dst | I/O model | Sent | Recv | Loss | Avg RTT |
+|---|---|---|---|---|---|---|
+| Client ↔ Server (Overlay) | PC → `10.13.0.1` | Event-driven (epoll/IOCP) | 282 | 282 | 0% | tens of ms |
+| Client ↔ Server (Underlay) | PC → `43.XXX.XX.XX` | Raw WAN baseline | 279 | 279 | 0% | tens of ms |
+| Client ↔ Client (P2P, Overlay) | PC → `10.13.0.5` | Event-driven, direct UDP punch | 7 | 7 | 0% | tens–hundreds of ms |
+
+- **Overlay** = traffic through the VPN tunnel (`10.13.0.x` addresses).
+- **Underlay** = the raw internet path to the peer's public IP, used as a
+  baseline so tunnel overhead can be told apart from ordinary WAN/mobile jitter.
+- Overlay RTT tracks the underlay baseline closely — the remaining
+  variance is mobile/WAN jitter, not VPN-tunnel overhead.
+- Before the event-driven fix, the fixed polling interval itself could
+  beat against periodic traffic (e.g. 1 Hz ping) and cause measurable
+  loss on the tunnel path; all three paths above now show 0% loss.
+- The P2P row confirms UDP hole punching completes and traffic flows
+  **direct** between peers (`[P2P] OK DIRECT ...`) rather than relayed
+  through the server — see [Step 8](#step-8--decentralized-mode-no-server-at-all).
+
 ---
 
 ## What's in this folder
