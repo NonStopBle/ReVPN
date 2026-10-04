@@ -1685,9 +1685,14 @@ struct Client {
         while (!g_quit) {
             // TUN -> VPN: drain everything currently queued in the ring.
             // (No epoll/IOCP wait on WintunGetReadWaitEvent here — this
-            // busy-drains once per loop iteration instead, same 50ms
+            // busy-drains once per loop iteration instead, same 5ms
             // cadence as the poll() timeout below, so worst-case added
-            // latency matches the Linux build's own epoll timer tick.)
+            // latency matches the Linux build's own epoll timer tick.
+            // Kept short — not 50ms — because that 50ms ceiling beats
+            // against ping's 1s interval and shows up as a sawtooth
+            // in RTT measurements even though poll() itself wakes
+            // immediately on data; see on_udp()'s and send_vpn()'s
+            // callers for the actual per-packet path.)
             for (;;) {
                 DWORD sz = 0;
                 uint8_t* p = g_wintun.ReceivePacket(wintun_session, &sz);
@@ -1701,7 +1706,7 @@ struct Client {
 
             // UDP -> dispatch
             pollfd pfd{}; pfd.fd = (SOCKET)udp_fd; pfd.events = POLLIN;
-            if (poll(&pfd, 1, 50) > 0 && (pfd.revents & POLLIN)) {
+            if (poll(&pfd, 1, 5) > 0 && (pfd.revents & POLLIN)) {
                 for (;;) {
                     sockaddr_in from{}; int fl = sizeof(from);
                     int r = recvfrom(udp_fd, (char*)tbuf, (int)sizeof(tbuf),
@@ -1776,8 +1781,11 @@ struct Client {
         epoll_event events[16];
 
         while (!g_quit) {
-            // epoll with 50ms timeout for timers
-            int n = epoll_wait(ep_fd, events, 16, 50);
+            // epoll with 5ms timeout for timers (was 50ms — that ceiling
+            // beats against ping's 1s interval and shows up as periodic
+            // sawtooth/plateau RTT patterns even though epoll_wait()
+            // itself wakes immediately once data is actually pending)
+            int n = epoll_wait(ep_fd, events, 16, 5);
             if (n < 0) { if (errno==EINTR) continue; break; }
 
             for (int i = 0; i < n; i++) {
@@ -2209,7 +2217,7 @@ int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str,
         // UDP -> dispatch
         static uint8_t ubuf[65536];
         pollfd pfd{}; pfd.fd = (SOCKET)cli.udp_fd; pfd.events = POLLIN;
-        if (poll(&pfd, 1, 50) > 0 && (pfd.revents & POLLIN)) {
+        if (poll(&pfd, 1, 5) > 0 && (pfd.revents & POLLIN)) {
             for (;;) {
                 sockaddr_in from{}; int fl = sizeof(from);
                 int r = recvfrom(cli.udp_fd, (char*)ubuf, (int)sizeof(ubuf), 0, (sockaddr*)&from, &fl);
@@ -2233,7 +2241,7 @@ int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str,
     epoll_event events[16];
 
     while (!g_quit) {
-        int n = epoll_wait(cli.ep_fd, events, 16, 50);
+        int n = epoll_wait(cli.ep_fd, events, 16, 5);
         if (n < 0) { if (errno == EINTR) continue; break; }
 
         for (int i = 0; i < n; i++) {
