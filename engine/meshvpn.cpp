@@ -4,6 +4,10 @@
 // Created by Rezier Labs
 // License: PolyForm Noncommercial 1.0.0 — see LICENSE in the repository root.
 // ============================================================================
+// Version printed in the startup banner and --help — bump this on every
+// change so a test log can be matched back to the exact build it ran.
+#define REVPN_VERSION "1.0.1"
+// ============================================================================
 // Build (standard — recvmmsg):
 //   g++ -std=c++17 -O3 -pthread meshvpn.cpp -o meshvpn
 // Build (AF_XDP zero-copy — kernel >= 5.1 + XDP NIC):
@@ -2337,6 +2341,7 @@ int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str,
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
 static void usage(const char* p) {
+    printf("ReVPN engine v" REVPN_VERSION "\n\n");
     printf("Usage:\n");
     printf("  # Server (pure bridge — no TUN, no VPN IP):\n");
     printf("  sudo %s --mode server --bind 0.0.0.0:9000 [--workers 4]\n\n",p);
@@ -2548,6 +2553,7 @@ int main(int argc, char* argv[]) {
 
     printf("╔══════════════════════════════════════════╗\n");
     printf("║       MeshVPN  (hub-and-spoke)          ║\n");
+    printf("║       v" REVPN_VERSION "                             ║\n");
     printf("╚══════════════════════════════════════════╝\n\n");
 
     signal(SIGINT,onsig); signal(SIGTERM,onsig);
