@@ -1061,6 +1061,22 @@ struct Server {
     }
 };
 
+// True for RFC1918 private ranges + the shared/CGNAT range (100.64.0.0/10,
+// common on carrier NAT and some mobile hotspots) + link-local. Used to
+// recognize a "closer than the public internet" path even when it isn't
+// the exact LAN candidate either side exchanged — e.g. two peers sharing
+// a phone hotspot can end up talking through an intermediate address
+// neither of them declared (the hotspot's own NAT between its tether and
+// Wi-Fi segments), which is still worth preferring over the public one.
+bool p2p_is_private_ipv4(uint32_t be_addr) {
+    uint32_t h = ntohl(be_addr);
+    return ((h & 0xFF000000) == 0x0A000000)    ||  // 10.0.0.0/8
+           ((h & 0xFFF00000) == 0xAC100000)    ||  // 172.16.0.0/12
+           ((h & 0xFFFF0000) == 0xC0A80000)    ||  // 192.168.0.0/16
+           ((h & 0xFFC00000) == 0x64400000)    ||  // 100.64.0.0/10 (CGNAT)
+           ((h & 0xFFFF0000) == 0xA9FE0000);       // 169.254.0.0/16 (link-local)
+}
+
 // ============================================================================
 // CLIENT — TUN + VPN IP, relay or P2P comm mode
 // ============================================================================
@@ -1369,15 +1385,18 @@ struct Client {
                 // punched every tick, so without this the final address is
                 // just whichever ACK happens to land last, and that's often
                 // the public one even when both peers are on the same LAN.
-                bool new_is_lan = p.has_lan &&
-                    from.sin_addr.s_addr == p.lan_addr.sin_addr.s_addr &&
-                    from.sin_port         == p.lan_addr.sin_port;
-                bool cur_is_lan = p.has_lan && was_direct &&
-                    p.addr.sin_addr.s_addr == p.lan_addr.sin_addr.s_addr &&
-                    p.addr.sin_port         == p.lan_addr.sin_port;
+                //
+                // Checked generically (any private/CGNAT range), not just
+                // "does it match the exact LAN candidate we exchanged" —
+                // behind some NATs (e.g. two peers sharing a phone hotspot)
+                // the address that actually works is a third one neither
+                // side declared, translated by an intermediate hop, but
+                // it's still a private address and still worth preferring.
+                bool new_is_lan = p2p_is_private_ipv4(from.sin_addr.s_addr);
+                bool cur_is_lan = was_direct && p2p_is_private_ipv4(p.addr.sin_addr.s_addr);
 
                 if (!(cur_is_lan && !new_is_lan))
-                    p.addr = from; // adopt LAN unconditionally, public only if not already on LAN
+                    p.addr = from; // adopt private unconditionally, public only if not already on one
 
                 p.st      = P2PSt::DIRECT;
                 p.t_p2prx = now_ms();

@@ -421,15 +421,22 @@ fields and fall back to public-only punching).
 
 Both the LAN and public candidates get punched every tick, and whichever
 ACK comes back first locks in `DIRECT` — but ReVPN also makes sure a
-*later*, slower public-path ACK can't un-lock an already-established LAN
-link, which would otherwise quietly send your traffic the long way round
-through your router/ISP and back even though both peers are three feet
-apart. Confirmation it's actually using the short path: `[P2P] OK DIRECT`
-prints `(LAN)` when it locked onto the LAN candidate. If you still see
-tens of milliseconds of latency on two machines on the same switch, check
-that line — if it's missing `(LAN)`, the LAN candidate's punch never made
-it back (double-check both machines really do share one router and that
-neither firewall is blocking the *other* machine's LAN IP specifically).
+*later*, slower public-path ACK can't un-lock an already-established
+private-address link, which would otherwise quietly send your traffic the
+long way round through your router/ISP and back even though both peers
+are three feet apart. This check is generic (any RFC1918/CGNAT/link-local
+address, not just an exact match on the one LAN candidate exchanged in
+the token) — behind some NATs (two peers sharing a phone hotspot, for
+example) the address that actually ends up working is a third one
+neither side declared, translated by an intermediate hop, but it's still
+worth preferring over the public one. Confirmation it's actually using a
+short path: `[P2P] OK DIRECT` prints `(LAN)` whenever the winning address
+is private. If you still see tens of milliseconds of latency between two
+machines that should be close, check that line, and check that both
+sides' declared LAN addresses (printed at startup) are actually on a
+mutually-reachable network — sharing the same *public* IP (e.g. both
+behind the same CGNAT/mobile carrier) doesn't necessarily mean a direct
+private route exists between them.
 
 **MTU:** the TUN MTU defaults to 1380, chosen to survive typical internet
 paths (PPPoE and other overhead-heavy links often can't do a full 1500
