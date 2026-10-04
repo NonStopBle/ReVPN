@@ -277,10 +277,20 @@ itself: on every launch (any mode, from the menu or a flag) it checks
 whether the `ReVPN-engine` Firewall rule exists, and if not, triggers
 the normal Windows UAC "allow this app to make changes?" prompt — say
 yes once, and it adds the inbound+outbound UDP rule for you and
-carries on with whatever you asked for, no separate step needed. If
-you ever need to add it by hand: Windows Defender Firewall → Advanced
-Settings → Inbound Rules → New Rule → Program → point it at
-`ReVPN-engine.exe` → Allow, for UDP.
+carries on with whatever you asked for, no separate step needed.
+
+**Tunnel working but `ping` still times out?** That's a second, separate
+Windows Firewall default: inbound ICMPv4/ICMPv6 Echo Request ("File and
+Printer Sharing — Echo Request") is off by default on any new network
+adapter, Wintun's included — independent of the UDP program rule above.
+You can have real tunnel traffic flowing (RX counters climbing, `[P2P] OK
+DIRECT`) and `ping` will still report 100% loss until this is allowed too.
+`ReVPN.bat` adds this rule in the same self-elevating step as the UDP one,
+so a single UAC prompt covers both. If you ever need to add either by hand:
+Windows Defender Firewall → Advanced Settings → Inbound Rules → New Rule →
+Program → point it at `ReVPN-engine.exe` → Allow, for UDP (the tunnel rule),
+and a second rule → Custom → Protocol type ICMPv4 (and ICMPv6) → Specific
+ICMP types → Echo Request → Allow (the ping rule).
 
 `ReVPN.bat` supports all three modes — `--server`, `--client`, and
 `--decentralized` — through the same interactive menu or flags as the

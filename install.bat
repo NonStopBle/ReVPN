@@ -8,13 +8,19 @@ REM      build it if not - requires Linux/WSL + mingw-w64, see build_windows.sh)
 REM   2. Downloads wintun.dll (needed by --client and --decentralized) from
 REM      https://www.wintun.net/ and drops the right architecture copy next
 REM      to ReVPN-engine.exe.
-REM   3. Adds a Windows Firewall rule allowing inbound UDP to
-REM      ReVPN-engine.exe. Without this, Windows Firewall silently drops
-REM      unsolicited inbound UDP packets (server traffic, and - critically
-REM      for --decentralized/--client P2P - the other peer's hole-punch
-REM      and ACK packets), which looks like "TX keeps climbing, RX stays
-REM      at 0 forever" even though both sides are sending correctly.
-REM      (ReVPN.bat also checks/adds this rule itself on every run now,
+REM   3. Adds Windows Firewall rules:
+REM      - inbound+outbound UDP for ReVPN-engine.exe. Without this,
+REM        Windows Firewall silently drops unsolicited inbound UDP packets
+REM        (server traffic, and - critically for --decentralized/--client
+REM        P2P - the other peer's hole-punch and ACK packets), which looks
+REM        like "TX keeps climbing, RX stays at 0 forever" even though
+REM        both sides are sending correctly.
+REM      - inbound ICMPv4/ICMPv6 echo request. This is separate from the
+REM        program rule above: Windows disables ping replies by default on
+REM        any new network adapter (including Wintun's), so even once the
+REM        UDP tunnel itself is working, `ping` across the mesh will time
+REM        out until this is allowed too.
+REM      (ReVPN.bat also checks/adds both rules itself on every run now,
 REM      self-elevating via UAC if needed - this step here just lets you
 REM      get it out of the way up front instead of hitting a UAC prompt
 REM      the first time you actually launch a mode.)
@@ -139,6 +145,19 @@ if errorlevel 1 (
     echo        %ENGINE%  -^> Allow, for UDP.
 ) else (
     echo [OK] Firewall rule added.
+)
+
+REM ICMP echo is blocked separately from the program rule above - Windows
+REM Firewall's "File and Printer Sharing - Echo Request" rule is off by
+REM default on any new adapter, including Wintun's. Without this, `ping`
+REM across the mesh times out even when the UDP tunnel itself works fine.
+netsh advfirewall firewall show rule name="ReVPN-ICMPv4" >nul 2>&1
+if errorlevel 1 (
+    netsh advfirewall firewall add rule name="ReVPN-ICMPv4" dir=in action=allow protocol=icmpv4:8,any >nul
+    netsh advfirewall firewall add rule name="ReVPN-ICMPv6" dir=in action=allow protocol=icmpv6:8,any >nul
+    echo [OK] Firewall rule added for ping ^(ICMPv4/v6 echo^).
+) else (
+    echo [OK] ICMP echo firewall rule already present.
 )
 
 :PYTHON_CHECK

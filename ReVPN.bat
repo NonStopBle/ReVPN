@@ -328,5 +328,15 @@ if errorlevel 1 (
 )
 
 netsh advfirewall firewall add rule name="ReVPN-engine" dir=out action=allow program="%ENGINE%" protocol=UDP enable=yes >nul 2>&1
-echo ReVPN: added a Windows Firewall rule allowing ReVPN-engine.exe ^(UDP, in+out^).
+
+REM Windows Firewall blocks inbound ICMPv4/ICMPv6 Echo Request by default on
+REM any new adapter (the "File and Printer Sharing - Echo Request" rule is
+REM off out of the box). That has nothing to do with ReVPN-engine.exe's own
+REM rule above - it blocks ping *through* the Wintun virtual adapter even
+REM when the UDP tunnel itself is working fine. Allow it too so `ping` across
+REM the mesh behaves like any other traffic.
+netsh advfirewall firewall add rule name="ReVPN-ICMPv4" dir=in action=allow protocol=icmpv4:8,any >nul 2>&1
+netsh advfirewall firewall add rule name="ReVPN-ICMPv6" dir=in action=allow protocol=icmpv6:8,any >nul 2>&1
+
+echo ReVPN: added Windows Firewall rules for ReVPN-engine.exe ^(UDP, in+out^) and ping ^(ICMPv4/v6 echo^).
 goto :eof
