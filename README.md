@@ -571,6 +571,10 @@ over mobile and home WAN links, not a loopback simulation:
   <img width="889" height="656" alt="tui_ui" src="https://github.com/user-attachments/assets/9b6e4a38-4674-4c99-a2ae-6015085b1e22" />
 </p>
 
+<p align="center">
+  <img width="982" height="513" alt="tui_win" src="https://github.com/user-attachments/assets/e905c98c-d3c1-4cb4-a973-9d23812e31f1" />
+</p>
+
 <p align="center"><b>Figure 7:</b> The TUI main menu — the same five modes, picked from a whiptail screen.</p>
 
 Running `ReVPN.sh` with no arguments opens a full-screen menu (`whiptail`,
