@@ -1,6 +1,9 @@
 // ============================================================================
 // meshvpn.cpp — Hub-and-spoke VPN, optimized for high throughput
 // ============================================================================
+// Created by Rezier Labs
+// License: PolyForm Noncommercial 1.0.0 — see LICENSE in the repository root.
+// ============================================================================
 // Build (standard — recvmmsg):
 //   g++ -std=c++17 -O3 -pthread meshvpn.cpp -o meshvpn
 // Build (AF_XDP zero-copy — kernel >= 5.1 + XDP NIC):
