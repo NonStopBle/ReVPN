@@ -419,6 +419,25 @@ and sending. If you hit that symptom with two peers on the same
 network, update to a build with this fix (older tokens lack the LAN
 fields and fall back to public-only punching).
 
+Both the LAN and public candidates get punched every tick, and whichever
+ACK comes back first locks in `DIRECT` — but ReVPN also makes sure a
+*later*, slower public-path ACK can't un-lock an already-established LAN
+link, which would otherwise quietly send your traffic the long way round
+through your router/ISP and back even though both peers are three feet
+apart. Confirmation it's actually using the short path: `[P2P] OK DIRECT`
+prints `(LAN)` when it locked onto the LAN candidate. If you still see
+tens of milliseconds of latency on two machines on the same switch, check
+that line — if it's missing `(LAN)`, the LAN candidate's punch never made
+it back (double-check both machines really do share one router and that
+neither firewall is blocking the *other* machine's LAN IP specifically).
+
+**MTU:** the TUN MTU defaults to 1380, chosen to survive typical internet
+paths (PPPoE and other overhead-heavy links often can't do a full 1500
+end-to-end, and ReVPN doesn't fragment — an oversized packet just gets
+dropped). Pass `--mtu 1500` when you know the full path supports it, e.g.
+two peers on the same LAN/switch — packet buffers are sized to take the
+full 1500 safely either way.
+
 ```
 --vpn-ip     ip     This node's VPN IP, e.g. 10.13.0.2       (required)
 --id         name   Your display name, shown in the token    (required)

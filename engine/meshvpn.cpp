@@ -235,6 +235,15 @@ struct __attribute__((packed)) DataHdr {
 };
 static constexpr size_t DHSZ = sizeof(DataHdr); // 11
 
+// Largest IP packet (TUN payload) ReVPN will carry — must stay >= the
+// largest --mtu anyone passes. Packet buffers are sized MAX_TUN_PKT+DHSZ+8
+// (header + AEAD-placeholder nonce). Raising this does NOT raise the
+// default TUN MTU (still 1380, chosen to avoid fragmentation on real
+// internet paths with sub-1500 links, e.g. PPPoE) — it just means
+// --mtu up to 1500 (e.g. for same-LAN / same-switch peers where the
+// full path MTU is a known 1500) no longer gets silently truncated.
+static constexpr size_t MAX_TUN_PKT = 1500;
+
 // ── Crypto placeholder (XOR — replace with AES-256-GCM via OpenSSL) ───────────
 static const uint8_t XK[32] = {
     0x4d,0x65,0x73,0x68,0x56,0x50,0x4e,0x4b,
@@ -610,7 +619,7 @@ struct Server {
         } else if (h->type == MSG_DATA_ENC) {
             if (DHSZ+plen+8 > len) return;
             uint64_t nc; memcpy(&nc, buf+DHSZ+plen, 8);
-            static thread_local uint8_t plain[1400];
+            static thread_local uint8_t plain[MAX_TUN_PKT];
             if (plen > sizeof(plain)) return;
             xcrypt(buf+DHSZ, plain, plen, nc);
             self_tun_write(plain, plen);
@@ -623,7 +632,7 @@ struct Server {
     // Server-originated traffic: TUN -> a client, addressed by the routing
     // table exactly like a normal client's send_vpn().
     void send_self(const uint8_t* pkt, size_t len, uint32_t dst_vpn) {
-        if (!len || len > 1400 || worker_fds.empty()) return;
+        if (!len || len > MAX_TUN_PKT || worker_fds.empty()) return;
         sockaddr_in dst{};
         {
             std::shared_lock<std::shared_mutex> lk(tbl_mtx);
@@ -633,7 +642,7 @@ struct Server {
             if (cit == by_node.end()) return;
             dst = cit->second.pub_addr;
         }
-        static thread_local uint8_t obuf[1400 + DHSZ + 8];
+        static thread_local uint8_t obuf[MAX_TUN_PKT + DHSZ + 8];
         auto* h = (DataHdr*)obuf;
         h->src_vpn = self_vpn_ip; h->dst_vpn = dst_vpn; h->payload_len = (uint16_t)len;
         int fd = worker_fds[0];
@@ -1191,7 +1200,7 @@ struct Client {
 
     // ── VPN packet send ───────────────────────────────────────────────────────
     void send_vpn(const uint8_t* pkt, size_t len, uint32_t dst_vpn) {
-        if (!len || len > 1400) return;
+        if (!len || len > MAX_TUN_PKT) return;
 
         // Routing: direct P2P or via server
         sockaddr_in dst = srv;
@@ -1204,7 +1213,7 @@ struct Client {
             }
         }
 
-        static uint8_t buf[1400 + DHSZ + 8];
+        static uint8_t buf[MAX_TUN_PKT + DHSZ + 8];
         auto* h = (DataHdr*)buf;
         h->src_vpn = my_vpn; h->dst_vpn = dst_vpn;
         h->payload_len = (uint16_t)len;
@@ -1250,7 +1259,7 @@ struct Client {
         } else if (h->type == MSG_DATA_ENC) {
             if (DHSZ+plen+8 > len) return;
             uint64_t nc; memcpy(&nc, buf+DHSZ+plen, 8);
-            static uint8_t plain[1400];
+            static uint8_t plain[MAX_TUN_PKT];
             if (plen > sizeof(plain)) return;
             xcrypt(buf+DHSZ, plain, plen, nc);
             tun_write(plain, plen); rx += plen;
@@ -1353,15 +1362,32 @@ struct Client {
             if (nid == sender_nid || peer_key == from_key)
             {
                 bool was_direct = p.direct();
-                p.addr    = from; // lock in actual NAT address
+
+                // Prefer the LAN candidate over the public/hairpin one and,
+                // once locked onto it, don't let a later (slower) public ACK
+                // win the race and downgrade us back onto it — both get
+                // punched every tick, so without this the final address is
+                // just whichever ACK happens to land last, and that's often
+                // the public one even when both peers are on the same LAN.
+                bool new_is_lan = p.has_lan &&
+                    from.sin_addr.s_addr == p.lan_addr.sin_addr.s_addr &&
+                    from.sin_port         == p.lan_addr.sin_port;
+                bool cur_is_lan = p.has_lan && was_direct &&
+                    p.addr.sin_addr.s_addr == p.lan_addr.sin_addr.s_addr &&
+                    p.addr.sin_port         == p.lan_addr.sin_port;
+
+                if (!(cur_is_lan && !new_is_lan))
+                    p.addr = from; // adopt LAN unconditionally, public only if not already on LAN
+
                 p.st      = P2PSt::DIRECT;
                 p.t_p2prx = now_ms();
                 p.gave_up = false;
 
                 if (!was_direct)
-                    printf("[P2P] OK DIRECT  vpn=%-16s  %s  (punch#%d)\n",
+                    printf("[P2P] OK DIRECT  vpn=%-16s  %s%s  (punch#%d)\n",
                            ip4str(p.vpn_ip).c_str(),
-                           addrstr(from).c_str(), p.punch_n);
+                           addrstr(p.addr).c_str(), new_is_lan ? " (LAN)" : "",
+                           p.punch_n);
                 return;
             }
         }
@@ -2248,7 +2274,8 @@ static void usage(const char* p) {
     printf("  --subnet   n        VPN prefix length       (default 16)\n");
     printf("  --node-id  hex      32-bit node ID          (default auto)\n");
     printf("  --no-encrypt        Disable encryption\n");
-    printf("  --mtu      n        TUN MTU                 (default 1380)\n");
+    printf("  --mtu      n        TUN MTU, up to 1500      (default 1380 - safe\n");
+    printf("                      over the internet; use 1500 for same-LAN peers)\n");
     printf("  --id         name   (decentralized) your display name in the token\n");
     printf("  --vpn-ip     ip     (decentralized) this node's VPN IP, e.g. 10.13.0.2\n");
     printf("  --port       n      (decentralized) local UDP port          (default 51001)\n");
