@@ -259,13 +259,25 @@ Two options:
   run `ReVPN` (see `python/README.md`) — this one also has the
   interactive menu.
 
-First run `install.bat` (double-click it, or run from `cmd`/PowerShell).
-It checks that `build-windows\ReVPN-engine.exe` exists, downloads
-`wintun.dll` for your CPU architecture straight from
+First run `install.bat` **as Administrator** (right-click → "Run as
+administrator", or from an elevated `cmd`/PowerShell). It checks that
+`build-windows\ReVPN-engine.exe` exists, downloads `wintun.dll` for
+your CPU architecture straight from
 [wintun.net](https://www.wintun.net/) into `build-windows\` next to the
-engine, and checks whether Python is on `PATH` (only needed for
-`python\ReVPN.py`). Run it again any time; it skips the download if
-`wintun.dll` is already there.
+engine, adds a Windows Firewall rule allowing `ReVPN-engine.exe`
+inbound/outbound UDP, and checks whether Python is on `PATH` (only
+needed for `python\ReVPN.py`). Run it again any time; it skips steps
+that are already done.
+
+**The firewall rule matters, not just Wintun.** Without it, Windows
+Firewall silently drops unsolicited inbound UDP — on a peer-to-peer
+mode (`--client`/`--decentralized`) that looks exactly like "my TX
+counter keeps climbing but RX stays at 0 forever, punch never
+succeeds", because the *other* side's punch/ACK packets never make it
+past the firewall to the engine. If you ran `install.bat` without
+Administrator earlier, re-run it elevated, or add the rule by hand:
+Windows Defender Firewall → Advanced Settings → Inbound Rules → New
+Rule → Program → point it at `ReVPN-engine.exe` → Allow, for UDP.
 
 `ReVPN.bat` supports all three modes — `--server`, `--client`, and
 `--decentralized` — through the same interactive menu or flags as the
@@ -288,17 +300,25 @@ backend.
 ## Step 7 — Server-as-peer (server joins the mesh too)
 
 By default the server is a pure relay with no VPN identity of its own.
-Add `--vpn-ip` to server mode (Linux only) to have the server machine
-open its own TUN device and join the mesh as a regular peer — clients
-can then reach the server itself at that address, not just relay
-through it for each other:
+Add `--vpn-ip` to server mode (Linux, or Windows via Wintun — same as
+`--client`/`--decentralized`, see [Step 6](#step-6--windows)) to have
+the server machine open its own TUN device and join the mesh as a
+regular peer — clients can then reach the server itself at that
+address, not just relay through it for each other:
 
 ```sh
 sudo ./ReVPN.sh --server --port 9000 --vpn-ip 10.13.0.1
 ```
 
-The TUI's Server form asks the same question ("Also join the mesh
-yourself?") and fills in `--vpn-ip`/`--subnet` for you if you say yes.
+```bat
+REM Windows — run ReVPN-engine.exe as Administrator, with wintun.dll
+REM next to it (install.bat sets that up):
+ReVPN.bat --server --port 9000 --vpn-ip 10.13.0.1
+```
+
+The TUI's Server form (and `ReVPN.bat`'s own menu) asks the same
+question ("Also join the mesh yourself?") and fills in
+`--vpn-ip`/`--subnet` for you if you say yes.
 
 ---
 
@@ -425,7 +445,8 @@ packet loss) so you can sanity-check a server before depending on it.
   rendezvous/relay. No TUN device, no VPN identity of its own by
   default — it just remembers each client's public `ip:port` and
   forwards packets between them. Multi-threaded with `SO_REUSEPORT` +
-  `recvmmsg` batching on Linux. Pass `--vpn-ip` (Linux only — see
+  `recvmmsg` batching on Linux. Pass `--vpn-ip` (Linux, or Windows via
+  Wintun — see
   [Step 7](#step-7--server-as-peer-server-joins-the-mesh-too)) to have
   it also open a TUN device and join the mesh as a regular peer;
   clients already route unknown/server-bound traffic to the server's
@@ -467,9 +488,10 @@ screen before launching. The AF_XDP interface field is a picker built
 from this machine's real `ip link` output (never free-typed), and is
 only offered if the engine was built with `./build.sh --xdp` (checked
 via a `build/.xdp_enabled` marker file, not by probing the binary).
-The Server form also offers server-as-peer (Step 7, Linux only) and
-adjusts the confirm screen to show the resulting VPN IP/subnet when
-enabled.
+The Server form also offers server-as-peer (Step 7, Linux or Windows)
+and adjusts the confirm screen to show the resulting VPN IP/subnet when
+enabled. `ReVPN.bat`'s own menu has the same question for its Server
+form.
 
 ## Saved settings (presets) and `--config`
 
@@ -536,7 +558,7 @@ There are **two** separate Windows binaries:
 | `--server`                 | Full C++ engine (recvmmsg-class throughput)                  | Pure-Python server                                  |
 | `--client` / TUN           | Own Wintun integration (dynamically loaded `wintun.dll`), unverified on real hardware | Independent Wintun backend, unverified on real hardware |
 | `--decentralized`          | Supported via `ReVPN.bat --decentralized` (same Wintun dependency as `--client`) | Not exposed on the Windows build                    |
-| Server-as-peer (`--vpn-ip`)| Linux only — fails cleanly on Windows with a clear message    | Not exposed on the Windows build                    |
+| Server-as-peer (`--vpn-ip`)| Supported — own Wintun adapter (`ReVPNS0`), same as `--client`  | Not exposed on the Windows build                    |
 | Stress test                | Via the bash `ReVPN.sh --stress` wrapper, not the raw .exe       | Built in (`--stress`, or from the menu)             |
 
 Build them with `./build_windows.sh` (needs

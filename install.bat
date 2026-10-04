@@ -8,10 +8,16 @@ REM      build it if not - requires Linux/WSL + mingw-w64, see build_windows.sh)
 REM   2. Downloads wintun.dll (needed by --client and --decentralized) from
 REM      https://www.wintun.net/ and drops the right architecture copy next
 REM      to ReVPN-engine.exe.
-REM   3. Checks for Python 3 (optional - only needed for python\ReVPN.py).
+REM   3. Adds a Windows Firewall rule allowing inbound UDP to
+REM      ReVPN-engine.exe. Without this, Windows Firewall silently drops
+REM      unsolicited inbound UDP packets (server traffic, and - critically
+REM      for --decentralized/--client P2P - the other peer's hole-punch
+REM      and ACK packets), which looks like "TX keeps climbing, RX stays
+REM      at 0 forever" even though both sides are sending correctly.
+REM   4. Checks for Python 3 (optional - only needed for python\ReVPN.py).
 REM
 REM Run this once after cloning/extracting the repo on a Windows machine,
-REM before using ReVPN.bat --client or ReVPN.bat --decentralized.
+REM as Administrator, before using ReVPN.bat --client or --decentralized.
 REM ============================================================================
 setlocal enabledelayedexpansion
 set "SELF_DIR=%~dp0"
@@ -51,7 +57,7 @@ echo.
 REM --- 3. Wintun driver DLL ----------------------------------------------
 if exist "%WINTUN_DLL%" (
     echo [OK] wintun.dll already present: %WINTUN_DLL%
-    goto PYTHON_CHECK
+    goto FIREWALL_CHECK
 )
 
 if not exist "%ENGINE_DIR%" mkdir "%ENGINE_DIR%"
@@ -64,7 +70,7 @@ if errorlevel 1 (
     echo        Download it yourself from https://www.wintun.net/
     echo        and copy wintun\bin\%ARCH%\wintun.dll to:
     echo          %WINTUN_DLL%
-    goto PYTHON_CHECK
+    goto FIREWALL_CHECK
 )
 
 echo [INFO] Extracting ...
@@ -73,7 +79,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 if errorlevel 1 (
     echo [FAIL] Could not extract the Wintun archive.
     del /q "%TMP_ZIP%" >nul 2>&1
-    goto PYTHON_CHECK
+    goto FIREWALL_CHECK
 )
 
 set "SRC_DLL=%TMP_EXTRACT%\wintun\bin\%ARCH%\wintun.dll"
@@ -91,6 +97,45 @@ if exist "%SRC_DLL%" (
 
 del /q "%TMP_ZIP%" >nul 2>&1
 rmdir /s /q "%TMP_EXTRACT%" >nul 2>&1
+
+:FIREWALL_CHECK
+echo.
+net session >nul 2>&1
+if errorlevel 1 (
+    echo [SKIP] Not running as Administrator - cannot add a firewall rule.
+    echo        Re-run install.bat as Administrator, or allow
+    echo        "%ENGINE%" through Windows Firewall yourself
+    echo        ^(inbound AND outbound, UDP^) when prompted.
+    goto PYTHON_CHECK
+)
+
+if not exist "%ENGINE%" (
+    echo [SKIP] Engine not built yet - run install.bat again after building
+    echo        it to add the firewall rule.
+    goto PYTHON_CHECK
+)
+
+netsh advfirewall firewall show rule name="ReVPN-engine" >nul 2>&1
+if not errorlevel 1 (
+    echo [OK] Firewall rule "ReVPN-engine" already present.
+    goto PYTHON_CHECK
+)
+
+echo [INFO] Adding Windows Firewall rules for ReVPN-engine.exe ^(inbound + outbound UDP^) ...
+netsh advfirewall firewall add rule name="ReVPN-engine" dir=in action=allow program="%ENGINE%" protocol=UDP enable=yes >nul
+netsh advfirewall firewall add rule name="ReVPN-engine" dir=out action=allow program="%ENGINE%" protocol=UDP enable=yes >nul
+if errorlevel 1 (
+    echo [FAIL] Could not add the firewall rule automatically.
+    echo        Without it, Windows Firewall silently drops unsolicited
+    echo        inbound UDP ^(server traffic, and peer hole-punch/ACK
+    echo        packets in --client/--decentralized modes^) - this looks
+    echo        like a connection that sends fine but never receives.
+    echo        Add it yourself: Windows Defender Firewall -^> Advanced
+    echo        Settings -^> Inbound Rules -^> New Rule -^> Program -^>
+    echo        %ENGINE%  -^> Allow, for UDP.
+) else (
+    echo [OK] Firewall rule added.
+)
 
 :PYTHON_CHECK
 echo.

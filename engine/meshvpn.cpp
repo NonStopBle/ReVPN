@@ -396,13 +396,18 @@ struct Server {
     // Optional: server also joins the mesh as a peer, reachable at its own
     // VPN IP (e.g. so clients can reach the server host itself, not just
     // each other). Off by default — pure bridge, as before — enabled with
-    // --vpn-ip on the server CLI. Linux only (reuses open_linux_tun()).
+    // --vpn-ip on the server CLI. Linux uses open_linux_tun(); Windows uses
+    // Wintun (same backend as client/decentralized mode).
     uint32_t    self_vpn_ip   = 0;    // network byte order; 0 = disabled
     uint32_t    self_node_id  = 0;
     bool        self_encrypt  = true;
     int         tun_fd        = -1;
     uint64_t    self_nonce    = 0;
     std::thread self_tun_thread;
+#ifdef _WIN32
+    void* wintun_adapter = nullptr;
+    void* wintun_session = nullptr;
+#endif
 
     // Routing table — protected by shared_mutex (many-reader, single-writer)
     mutable std::shared_mutex tbl_mtx;
@@ -524,12 +529,67 @@ struct Server {
         uint32_t h32 = self_vpn_ip; h32 ^= h32>>16; h32 *= 0x45d9f3b; h32 ^= h32>>16;
         self_node_id = h32;
         self_tun_thread = std::thread([this]{ self_tun_reader(); });
+#elif defined(_WIN32)
+        if (!g_wintun.load())
+            throw std::runtime_error(
+                "wintun.dll not found (or missing expected exports). "
+                "Download it from https://www.wintun.net/ and place "
+                "wintun.dll next to ReVPN-engine.exe, then run as "
+                "Administrator.");
+
+        GUID guid{};
+        CoCreateGuid(&guid);
+        wintun_adapter = g_wintun.CreateAdapter(L"ReVPNS0", L"ReVPN-Server", &guid);
+        if (!wintun_adapter)
+            throw std::runtime_error(
+                "WintunCreateAdapter failed (GetLastError=" +
+                std::to_string(GetLastError()) + ") — need Administrator?");
+
+        wintun_session = g_wintun.StartSession(wintun_adapter, 0x400000);
+        if (!wintun_session) {
+            g_wintun.CloseAdapter(wintun_adapter); wintun_adapter = nullptr;
+            throw std::runtime_error(
+                "WintunStartSession failed (GetLastError=" +
+                std::to_string(GetLastError()) + ")");
+        }
+
+        uint32_t mask = prefix ? htonl(~((1u<<(32-prefix))-1)) : 0;
+        in_addr m{}; m.s_addr = mask;
+        char maskbuf[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &m, maskbuf, sizeof(maskbuf));
+        std::string ipcmd = std::string("netsh interface ip set address ") +
+            "name=\"ReVPNS0\" static " + vpn_ip + " " + maskbuf;
+        system(ipcmd.c_str());
+        std::string mtucmd = "netsh interface ipv4 set subinterface "
+            "\"ReVPNS0\" mtu=" + std::to_string(mtu) + " store=persistent";
+        system(mtucmd.c_str());
+
+        printf("[TUN] ReVPNS0 (Wintun)  ip=%s/%d  mtu=%d\n", vpn_ip, prefix, mtu);
+
+        self_vpn_ip  = inet_addr(vpn_ip);
+        uint32_t h32 = self_vpn_ip; h32 ^= h32>>16; h32 *= 0x45d9f3b; h32 ^= h32>>16;
+        self_node_id = h32;
+        self_tun_thread = std::thread([this]{ self_tun_reader(); });
 #else
         (void)vpn_ip; (void)prefix; (void)mtu;
         throw std::runtime_error(
             "server --vpn-ip (server-as-peer) needs a TUN device, which "
             "this build does not support on this OS yet. Run the server "
-            "under Linux/WSL2, or omit --vpn-ip for plain relay mode.");
+            "under Linux/WSL2/Windows, or omit --vpn-ip for plain relay mode.");
+#endif
+    }
+
+    // Hands a plaintext IP packet to whichever TUN backend this OS has.
+    void self_tun_write(const uint8_t* pkt, size_t n) {
+#ifdef __linux__
+        write(tun_fd, pkt, n);
+#elif defined(_WIN32)
+        uint8_t* p = g_wintun.AllocateSendPacket(wintun_session, (DWORD)n);
+        if (!p) return; // ring full — drop, same as a blocked write() would
+        memcpy(p, pkt, n);
+        g_wintun.SendPacket(wintun_session, p);
+#else
+        (void)pkt; (void)n; // unreachable — no TUN backend on this build
 #endif
     }
 
@@ -537,20 +597,20 @@ struct Server {
     // server's own VPN IP and hand it to the local TUN, instead of
     // forwarding it to another client.
     void deliver_to_self(const uint8_t* buf, size_t len) {
-#ifdef __linux__
+#if defined(__linux__) || defined(_WIN32)
         if (len < DHSZ+1) return;
         const auto* h = (const DataHdr*)buf;
         uint16_t plen = h->payload_len;
         if (h->type == MSG_DATA) {
             if (DHSZ+plen > len) return;
-            write(tun_fd, buf+DHSZ, plen);
+            self_tun_write(buf+DHSZ, plen);
         } else if (h->type == MSG_DATA_ENC) {
             if (DHSZ+plen+8 > len) return;
             uint64_t nc; memcpy(&nc, buf+DHSZ+plen, 8);
             static thread_local uint8_t plain[1400];
             if (plen > sizeof(plain)) return;
             xcrypt(buf+DHSZ, plain, plen, nc);
-            write(tun_fd, plain, plen);
+            self_tun_write(plain, plen);
         }
 #else
         (void)buf; (void)len;
@@ -600,6 +660,22 @@ struct Server {
             if (r < 20) continue;
             uint32_t dst; memcpy(&dst, buf+16, 4);
             send_self(buf, (size_t)r, dst);
+        }
+#elif defined(_WIN32)
+        while (running.load(std::memory_order_relaxed)) {
+            bool got_any = false;
+            for (;;) {
+                DWORD sz = 0;
+                uint8_t* pkt = g_wintun.ReceivePacket(wintun_session, &sz);
+                if (!pkt) break;
+                got_any = true;
+                if (sz >= 20) {
+                    uint32_t dst; memcpy(&dst, pkt+16, 4);
+                    send_self(pkt, sz, dst);
+                }
+                g_wintun.ReleaseReceivePacket(wintun_session, pkt);
+            }
+            if (!got_any) Sleep(2);
         }
 #endif
     }
@@ -964,6 +1040,10 @@ struct Server {
         // no need to close the fd from here to unblock it.
         if (self_tun_thread.joinable()) self_tun_thread.join();
         if (tun_fd >= 0) close(tun_fd);
+#elif defined(_WIN32)
+        if (self_tun_thread.joinable()) self_tun_thread.join();
+        if (wintun_session) g_wintun.EndSession(wintun_session);
+        if (wintun_adapter) g_wintun.CloseAdapter(wintun_adapter);
 #endif
         print_status();
     }
@@ -2104,7 +2184,7 @@ static void usage(const char* p) {
     printf("  --bind     ip:port  Server bind addr        (default 0.0.0.0:9000)\n");
     printf("  --workers  n        Server worker threads   (default 4)\n");
     printf("  --vpn-ip   ip       (server) also join the mesh as a peer,\n");
-    printf("                      reachable at this VPN IP — Linux only\n");
+    printf("                      reachable at this VPN IP — Linux or Windows (Wintun)\n");
     printf("  --xdp-iface if     AF_XDP NIC (e.g. eth0)   (requires -DWITH_XDP)\n");
     printf("  --xdp-copy         Force XDP copy-mode\n");
     printf("  --server   ip:port  Server address (client)\n");

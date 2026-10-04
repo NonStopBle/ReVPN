@@ -103,10 +103,23 @@ if not "%PORT_IN%"=="" set "PORT=%PORT_IN%"
 set "WORKERS_IN="
 set /p "WORKERS_IN=Worker threads [%WORKERS%]: "
 if not "%WORKERS_IN%"=="" set "WORKERS=%WORKERS_IN%"
+set /p "ASPEER=Also join the mesh yourself, so clients can reach this server at its own VPN IP? (y/N): "
+if /i "%ASPEER%"=="y" (
+    if "!VPN_IP!"=="" set "VPN_IP=10.13.0.1"
+    set "VPN_IP_IN="
+    set /p "VPN_IP_IN=This server's VPN IP [!VPN_IP!]: "
+    if not "!VPN_IP_IN!"=="" set "VPN_IP=!VPN_IP_IN!"
+    set "SUBNET_IN="
+    set /p "SUBNET_IN=VPN network prefix length [!SUBNET!]: "
+    if not "!SUBNET_IN!"=="" set "SUBNET=!SUBNET_IN!"
+) else (
+    set "VPN_IP="
+)
 echo.
 echo Start Server:
 echo   Port    : %PORT%
 echo   Workers : %WORKERS%
+if "%VPN_IP%"=="" (echo   VPN IP  : None ^(pure bridge^)) else (echo   VPN IP  : %VPN_IP%/%SUBNET%  ^(server joins as a peer^))
 set /p "CONFIRM=Proceed? (Y/n): "
 if /i "%CONFIRM%"=="n" goto MENU
 goto RUNSERVER
@@ -171,8 +184,14 @@ REM ============================================================================
 REM Launchers
 REM ============================================================================
 :RUNSERVER
-echo ReVPN: starting server on 0.0.0.0:%PORT% (%WORKERS% workers)
-"%ENGINE%" --mode server --bind 0.0.0.0:%PORT% --workers %WORKERS%
+set "SELFPEER="
+if not "%VPN_IP%"=="" set "SELFPEER=--vpn-ip %VPN_IP% --subnet %SUBNET%"
+if "%VPN_IP%"=="" (
+    echo ReVPN: starting server on 0.0.0.0:%PORT% ^(%WORKERS% workers^)
+) else (
+    echo ReVPN: starting server on 0.0.0.0:%PORT% ^(%WORKERS% workers^), joining mesh as %VPN_IP%/%SUBNET%
+)
+"%ENGINE%" --mode server --bind 0.0.0.0:%PORT% --workers %WORKERS% %SELFPEER%
 exit /b %ERRORLEVEL%
 
 :RUNCLIENT
@@ -223,6 +242,9 @@ echo.
 echo SERVER OPTIONS:
 echo   --port ^<n^>          UDP port to listen on         (default: 9000)
 echo   --workers ^<n^>       Server worker threads          (default: 4)
+echo   --vpn-ip ^<ip^>       Also join the mesh as a peer, reachable
+echo                       at this VPN IP (default: pure bridge, no TUN)
+echo   --subnet ^<n^>        VPN network prefix length, with --vpn-ip (default: 16)
 echo.
 echo CLIENT OPTIONS:
 echo   --connect ^<ip:port^>  Address of the ReVPN server to join    (required)
