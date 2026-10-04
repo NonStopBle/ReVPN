@@ -662,33 +662,47 @@ struct Server {
 
     void self_tun_reader() {
 #ifdef __linux__
+        // Event-driven, not a busy-sleep loop: poll() blocks until tun_fd
+        // is actually readable (or up to 200ms, just so running==false is
+        // noticed promptly on shutdown) instead of waking every 2ms to
+        // check — that 2ms ceiling was adding its own worst-case latency
+        // to server-as-peer's own outbound traffic, same category of bug
+        // as the client/decentralized loops' old fixed poll timeout.
         static uint8_t buf[65536];
+        pollfd pfd{ tun_fd, POLLIN, 0 };
         while (running.load(std::memory_order_relaxed)) {
-            ssize_t r = read(tun_fd, buf, sizeof(buf));
-            if (r <= 0) {
-                if (r < 0 && errno != EAGAIN && errno != EWOULDBLOCK) break;
-                usleep(2000);
-                continue;
+            int ready = poll(&pfd, 1, 200);
+            if (ready < 0) { if (errno == EINTR) continue; break; }
+            if (ready == 0) continue; // timeout, just re-check running
+
+            while (true) {
+                ssize_t r = read(tun_fd, buf, sizeof(buf));
+                if (r <= 0) {
+                    if (r < 0 && errno != EAGAIN && errno != EWOULDBLOCK) goto linux_done;
+                    break;
+                }
+                if (r < 20) continue;
+                uint32_t dst; memcpy(&dst, buf+16, 4);
+                send_self(buf, (size_t)r, dst);
             }
-            if (r < 20) continue;
-            uint32_t dst; memcpy(&dst, buf+16, 4);
-            send_self(buf, (size_t)r, dst);
         }
+        linux_done:;
 #elif defined(_WIN32)
+        // Same idea on Windows: wait on Wintun's real read-wait event
+        // instead of Sleep(2)-ing between checks.
+        HANDLE hTunEvt = g_wintun.GetReadWaitEvent(wintun_session);
         while (running.load(std::memory_order_relaxed)) {
-            bool got_any = false;
+            WaitForSingleObject(hTunEvt, 200); // 200ms just to re-check running
             for (;;) {
                 DWORD sz = 0;
                 uint8_t* pkt = g_wintun.ReceivePacket(wintun_session, &sz);
                 if (!pkt) break;
-                got_any = true;
                 if (sz >= 20) {
                     uint32_t dst; memcpy(&dst, pkt+16, 4);
                     send_self(pkt, sz, dst);
                 }
                 g_wintun.ReleaseReceivePacket(wintun_session, pkt);
             }
-            if (!got_any) Sleep(2);
         }
 #endif
     }
