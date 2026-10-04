@@ -15,7 +15,7 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENGINE_BIN="$SELF_DIR/build/ReVPN-engine"
 STRESS_BIN="$SELF_DIR/tools/stress_client.py"
 
-VERSION="1.0.0"
+VERSION="1.0.1"
 
 # ── Defaults (Hamachi-like: sane out of the box) ───────────────────────────
 PORT=9000            # server bind port / client local udp port base
