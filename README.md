@@ -259,25 +259,28 @@ Two options:
   run `ReVPN` (see `python/README.md`) — this one also has the
   interactive menu.
 
-First run `install.bat` **as Administrator** (right-click → "Run as
-administrator", or from an elevated `cmd`/PowerShell). It checks that
-`build-windows\ReVPN-engine.exe` exists, downloads `wintun.dll` for
-your CPU architecture straight from
+First run `install.bat` (double-click it, or run from `cmd`/PowerShell).
+It checks that `build-windows\ReVPN-engine.exe` exists, downloads
+`wintun.dll` for your CPU architecture straight from
 [wintun.net](https://www.wintun.net/) into `build-windows\` next to the
-engine, adds a Windows Firewall rule allowing `ReVPN-engine.exe`
-inbound/outbound UDP, and checks whether Python is on `PATH` (only
-needed for `python\ReVPN.py`). Run it again any time; it skips steps
-that are already done.
+engine, and checks whether Python is on `PATH` (only needed for
+`python\ReVPN.py`). Run it again any time; it skips steps that are
+already done.
 
-**The firewall rule matters, not just Wintun.** Without it, Windows
-Firewall silently drops unsolicited inbound UDP — on a peer-to-peer
-mode (`--client`/`--decentralized`) that looks exactly like "my TX
-counter keeps climbing but RX stays at 0 forever, punch never
-succeeds", because the *other* side's punch/ACK packets never make it
-past the firewall to the engine. If you ran `install.bat` without
-Administrator earlier, re-run it elevated, or add the rule by hand:
-Windows Defender Firewall → Advanced Settings → Inbound Rules → New
-Rule → Program → point it at `ReVPN-engine.exe` → Allow, for UDP.
+**The firewall matters, not just Wintun.** Without an exception,
+Windows Firewall silently drops unsolicited inbound UDP — on a
+peer-to-peer mode (`--client`/`--decentralized`) that looks exactly
+like "my TX counter keeps climbing but RX stays at 0 forever, punch
+never succeeds", because the *other* side's punch/ACK packets never
+make it past the firewall to the engine. `ReVPN.bat` now handles this
+itself: on every launch (any mode, from the menu or a flag) it checks
+whether the `ReVPN-engine` Firewall rule exists, and if not, triggers
+the normal Windows UAC "allow this app to make changes?" prompt — say
+yes once, and it adds the inbound+outbound UDP rule for you and
+carries on with whatever you asked for, no separate step needed. If
+you ever need to add it by hand: Windows Defender Firewall → Advanced
+Settings → Inbound Rules → New Rule → Program → point it at
+`ReVPN-engine.exe` → Allow, for UDP.
 
 `ReVPN.bat` supports all three modes — `--server`, `--client`, and
 `--decentralized` — through the same interactive menu or flags as the

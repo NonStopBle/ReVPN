@@ -16,6 +16,16 @@ REM with a clear message if the DLL is missing. There is no --stress here:
 REM batch has no good way to
 REM run a background server + N synthetic clients and read its output back;
 REM use python\ReVPN.py --stress (or dist\ReVPN.exe --stress) for that.
+REM
+REM Firewall: on every real run (anything but --help), this script makes
+REM sure a Windows Firewall rule allowing ReVPN-engine.exe's UDP traffic
+REM exists - see ENSURE_FIREWALL below. If it's missing and we're not
+REM Administrator, Windows pops the normal UAC "allow this app" prompt
+REM (that's the one "ask" the user sees); once elevated, the rule is
+REM added silently ("auto allowed") and this same command line re-runs.
+REM Without it, Windows Firewall quietly drops unsolicited inbound UDP,
+REM which breaks --server and makes --client/--decentralized punch
+REM forever with RX stuck at 0.
 REM ============================================================================
 setlocal enabledelayedexpansion
 set "SELF_DIR=%~dp0"
@@ -26,6 +36,12 @@ if not exist "%ENGINE%" (
     echo        Build it first: build_windows.sh ^(from Linux/WSL, needs mingw-w64^)
     exit /b 1
 )
+
+if /i "%~1"=="--help" goto SKIP_FIREWALL
+if /i "%~1"=="-h"     goto SKIP_FIREWALL
+call :ENSURE_FIREWALL %*
+if "%FW_RELAUNCHED%"=="1" exit /b 0
+:SKIP_FIREWALL
 
 set "PORT=9000"
 set "WORKERS=4"
@@ -276,3 +292,41 @@ echo       actually exercise it against).
 echo.
 echo NOTE: no --stress here - use python\ReVPN.py --stress instead.
 exit /b 0
+
+REM ============================================================================
+REM :ENSURE_FIREWALL - make sure Windows Firewall allows ReVPN-engine.exe's
+REM UDP traffic (both directions), adding the rule if it's missing.
+REM
+REM If we're not Administrator, netsh's "add rule" fails, which we take as
+REM "need to elevate": re-launch this exact command line via UAC (the one
+REM prompt the user sees - "allow this app to make changes") in a new
+REM window and end this (non-elevated) instance. The elevated instance
+REM comes back through here, netsh succeeds, the rule gets added silently,
+REM and it falls through to run the rest of the script normally.
+REM
+REM Sets FW_RELAUNCHED=1 (in the caller, since this is `call`ed without its
+REM own setlocal) when it just kicked off the elevated relaunch, so the
+REM caller knows to stop instead of continuing unelevated.
+REM ============================================================================
+:ENSURE_FIREWALL
+netsh advfirewall firewall show rule name="ReVPN-engine" >nul 2>&1
+if not errorlevel 1 goto :eof
+
+netsh advfirewall firewall add rule name="ReVPN-engine" dir=in action=allow program="%ENGINE%" protocol=UDP enable=yes >nul 2>&1
+if errorlevel 1 (
+    echo ReVPN: needs a one-time Windows Firewall exception for ReVPN-engine.exe.
+    echo        Requesting Administrator - click "Yes" on the prompt...
+    powershell -NoProfile -Command "Start-Process -FilePath 'cmd.exe' -ArgumentList '/c \"%~f0\" %*' -Verb RunAs" >nul 2>&1
+    if errorlevel 1 (
+        echo ReVPN: could not request elevation automatically.
+        echo        Run this as Administrator yourself, or add the rule by hand:
+        echo        Windows Defender Firewall -^> Advanced Settings -^> Inbound
+        echo        Rules -^> New Rule -^> Program -^> "%ENGINE%" -^> Allow, UDP.
+    )
+    set "FW_RELAUNCHED=1"
+    goto :eof
+)
+
+netsh advfirewall firewall add rule name="ReVPN-engine" dir=out action=allow program="%ENGINE%" protocol=UDP enable=yes >nul 2>&1
+echo ReVPN: added a Windows Firewall rule allowing ReVPN-engine.exe ^(UDP, in+out^).
+goto :eof

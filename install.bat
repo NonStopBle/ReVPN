@@ -14,6 +14,10 @@ REM      unsolicited inbound UDP packets (server traffic, and - critically
 REM      for --decentralized/--client P2P - the other peer's hole-punch
 REM      and ACK packets), which looks like "TX keeps climbing, RX stays
 REM      at 0 forever" even though both sides are sending correctly.
+REM      (ReVPN.bat also checks/adds this rule itself on every run now,
+REM      self-elevating via UAC if needed - this step here just lets you
+REM      get it out of the way up front instead of hitting a UAC prompt
+REM      the first time you actually launch a mode.)
 REM   4. Checks for Python 3 (optional - only needed for python\ReVPN.py).
 REM
 REM Run this once after cloning/extracting the repo on a Windows machine,
