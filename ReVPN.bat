@@ -47,6 +47,7 @@ if "%FW_RELAUNCHED%"=="1" exit /b 0
 :SKIP_FIREWALL
 
 set "PORT=9000"
+set "PORT_SET=false"
 set "WORKERS=4"
 set "VPN_IP="
 set "CONNECT="
@@ -66,7 +67,7 @@ if /i "%~1"=="--client"       (set "MODE=client" & shift & goto PARSE)
 if /i "%~1"=="--decentralized" (set "MODE=decentralized" & shift & goto PARSE)
 if /i "%~1"=="--help"       goto HELP
 if /i "%~1"=="-h"           goto HELP
-if /i "%~1"=="--port"       (set "PORT=%~2"     & shift & shift & goto PARSE)
+if /i "%~1"=="--port"       (set "PORT=%~2" & set "PORT_SET=true" & shift & shift & goto PARSE)
 if /i "%~1"=="--workers"    (set "WORKERS=%~2"  & shift & shift & goto PARSE)
 if /i "%~1"=="--connect"    (set "CONNECT=%~2"  & shift & shift & goto PARSE)
 if /i "%~1"=="--vpn-ip"     (set "VPN_IP=%~2"   & shift & shift & goto PARSE)
@@ -160,11 +161,15 @@ set /p "ENC=Encrypt tunnel traffic? (Y/n): "
 if /i "%ENC%"=="n" (set "ENCRYPT=false") else (set "ENCRYPT=true")
 set /p "PUNCH=Try direct UDP hole punching first, auto relay fallback? (Y/n): "
 if /i "%PUNCH%"=="n" (set "RELAY_ONLY=true") else (set "RELAY_ONLY=false")
+set "CPORT_IN="
+set /p "CPORT_IN=Local UDP port for this client, e.g. to pick one consistently across restarts for firewall/port-forward rules (blank = engine default 51820): "
+if not "%CPORT_IN%"=="" (set "PORT=%CPORT_IN%" & set "PORT_SET=true")
 echo.
 echo Join as Client:
 echo   Server  : %CONNECT%
 echo   VPN IP  : %VPN_IP%/%SUBNET%
 echo   Encrypt : %ENCRYPT%
+if /i "%PORT_SET%"=="true" (echo   Local port : %PORT%) else (echo   Local port : ^(engine default, 51820^))
 if "%RELAY_ONLY%"=="true" (echo   Mode    : relay-only) else (echo   Mode    : p2p + auto relay fallback)
 set /p "CONFIRM=Proceed? (Y/n): "
 if /i "%CONFIRM%"=="n" goto MENU
@@ -186,11 +191,15 @@ set /p "SUBNET_IN=VPN network prefix length [%SUBNET%]: "
 if not "%SUBNET_IN%"=="" set "SUBNET=%SUBNET_IN%"
 set /p "ENC=Encrypt tunnel traffic? (Y/n): "
 if /i "%ENC%"=="n" (set "ENCRYPT=false") else (set "ENCRYPT=true")
+set "DPORT_IN="
+set /p "DPORT_IN=Local UDP port, e.g. to pick one consistently across restarts for firewall/port-forward rules (blank = engine default 51001): "
+if not "%DPORT_IN%"=="" (set "PORT=%DPORT_IN%" & set "PORT_SET=true")
 echo.
 echo Connect directly to a peer - no server:
 echo   Your name : %DC_ID%
 echo   VPN IP    : %VPN_IP%/%SUBNET%
 echo   Encrypt   : %ENCRYPT%
+if /i "%PORT_SET%"=="true" (echo   Local port : %PORT%) else (echo   Local port : ^(engine default, 51001^))
 echo.
 echo Next: this will print a short token - send that to every peer you want
 echo in the mesh (chat, voice, ...) - then ask you to paste each peer's token
@@ -226,9 +235,11 @@ set "COMM=p2p"
 if /i "%RELAY_ONLY%"=="true" set "COMM=relay"
 set "ENCFLAG="
 if /i "%ENCRYPT%"=="false" set "ENCFLAG=--no-encrypt"
+set "PORTFLAG="
+if /i "%PORT_SET%"=="true" set "PORTFLAG=--port %PORT%"
 echo ReVPN: joining %CONNECT% as %VPN_IP%/%SUBNET%  (mode=%COMM%, encrypt=%ENCRYPT%)
 if /i "%COMM%"=="p2p" echo ReVPN: will try direct UDP hole punching, auto-relay on failure
-"%ENGINE%" --mode client --vpn-ip %VPN_IP% --server %CONNECT% --comm %COMM% --subnet %SUBNET% %ENCFLAG%
+"%ENGINE%" --mode client --vpn-ip %VPN_IP% --server %CONNECT% --comm %COMM% --subnet %SUBNET% %ENCFLAG% %PORTFLAG%
 exit /b %ERRORLEVEL%
 
 :RUNDECENTRALIZED
@@ -242,8 +253,10 @@ if not defined VPN_IP (
 )
 set "ENCFLAG="
 if /i "%ENCRYPT%"=="false" set "ENCFLAG=--no-encrypt"
+set "PORTFLAG="
+if /i "%PORT_SET%"=="true" set "PORTFLAG=--port %PORT%"
 echo ReVPN: decentralized mode - no server, direct token exchange with your peer(s)
-"%ENGINE%" --mode decentralized --id %DC_ID% --vpn-ip %VPN_IP% --subnet %SUBNET%!PEER_TOKENS! %ENCFLAG%
+"%ENGINE%" --mode decentralized --id %DC_ID% --vpn-ip %VPN_IP% --subnet %SUBNET%!PEER_TOKENS! %ENCFLAG% %PORTFLAG%
 exit /b %ERRORLEVEL%
 
 REM ============================================================================
@@ -269,6 +282,10 @@ echo CLIENT OPTIONS:
 echo   --connect ^<ip:port^>  Address of the ReVPN server to join    (required)
 echo   --vpn-ip ^<ip^>        This node's VPN IP, e.g. 10.13.0.2      (required)
 echo   --subnet ^<n^>         VPN network prefix length              (default: 16)
+echo   --port ^<n^>           Local UDP port this client binds/punches
+echo                         from - pick your own for a stable
+echo                         firewall/port-forward rule across restarts
+echo                         (default: 51820)
 echo   --encrypt ^<true^|false^>  Encrypt tunnel traffic             (default: true)
 echo   --relay-only          Never attempt direct UDP hole punching
 echo.
@@ -276,6 +293,10 @@ echo DECENTRALIZED OPTIONS:
 echo   --id ^<name^>          Your display name in the token          (required)
 echo   --vpn-ip ^<ip^>        This node's VPN IP, e.g. 10.13.0.2       (required)
 echo   --subnet ^<n^>         VPN network prefix length               (default: 16)
+echo   --port ^<n^>           Local UDP port used for STUN + punching -
+echo                        pick your own for a stable firewall/
+echo                        port-forward rule across restarts
+echo                        (default: 51001)
 echo   --peer-token ^<tok^>   A peer's token - repeat this flag once per
 echo                        peer for a mesh of 3+. Skips the paste prompt.
 echo   --encrypt ^<true^|false^>  Encrypt tunnel traffic              (default: true)
