@@ -142,6 +142,7 @@
   #include <sys/epoll.h>
   #include <sys/ioctl.h>
   #include <sys/socket.h>
+  #include <sys/timerfd.h>
   #include <unistd.h>
   #define CLOSESOCK(fd) close(fd)
   #define SOCK_ERRNO errno
@@ -1110,9 +1111,12 @@ struct Client {
     sockaddr_in srv{};
 
     // FDs
-    int tun_fd = -1;
-    int udp_fd = -1;
-    int ep_fd  = -1;
+    int tun_fd   = -1;
+    int udp_fd   = -1;
+    int ep_fd    = -1;
+    int timer_fd = -1; // Linux: periodic wake source so epoll_wait() can
+                        // block indefinitely (no polling ceiling) and still
+                        // run tick_timers() on schedule.
 #ifdef _WIN32
     void* wintun_adapter = nullptr;
     void* wintun_session  = nullptr;
@@ -1209,6 +1213,20 @@ struct Client {
         epoll_ctl(ep_fd, EPOLL_CTL_ADD, tun_fd, &ev);
         ev.data.fd  = udp_fd;
         epoll_ctl(ep_fd, EPOLL_CTL_ADD, udp_fd, &ev);
+
+        // Periodic timer so epoll_wait() below can block with timeout=-1
+        // (true event-driven wakeup, no polling ceiling on packet
+        // latency) while tick_timers() (REGISTER/keepalive/etc, all on
+        // >=500ms schedules) still runs on time. Level-triggered — must
+        // be read() to clear after each fire, see the event loop.
+        timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+        itimerspec its{};
+        its.it_value.tv_nsec    = 100'000'000; // first fire in 100ms
+        its.it_interval.tv_nsec = 100'000'000; // then every 100ms
+        timerfd_settime(timer_fd, 0, &its, nullptr);
+        ev.events  = EPOLLIN;
+        ev.data.fd = timer_fd;
+        epoll_ctl(ep_fd, EPOLL_CTL_ADD, timer_fd, &ev);
 #endif
         // Non-Linux: unreachable — setup_tun() above already throws before
         // this would be called (see main()'s client path).
@@ -1682,17 +1700,26 @@ struct Client {
                addrstr(srv).c_str(), my_node);
 
         static uint8_t tbuf[65536];
+
+        // True event-driven wait instead of a fixed poll ceiling: Wintun
+        // hands out a real auto-reset event signaled when a packet is
+        // queued, and WSAEventSelect gives the UDP socket the same.
+        // WaitForMultipleObjects blocks until either fires, or the 100ms
+        // timeout elapses (just to keep tick_timers()'s own >=500ms
+        // schedules — REGISTER/keepalive/etc — ticking during idle
+        // periods). Packet latency is no longer bounded by any fixed
+        // interval the way the old poll(5)/poll(50) loop was.
+        HANDLE hTunEvt = g_wintun.GetReadWaitEvent(wintun_session);
+        WSAEVENT hUdpEvt = WSACreateEvent();
+        WSAEventSelect((SOCKET)udp_fd, hUdpEvt, FD_READ);
+        HANDLE waitHandles[2] = { hTunEvt, (HANDLE)hUdpEvt };
+
         while (!g_quit) {
-            // TUN -> VPN: drain everything currently queued in the ring.
-            // (No epoll/IOCP wait on WintunGetReadWaitEvent here — this
-            // busy-drains once per loop iteration instead, same 5ms
-            // cadence as the poll() timeout below, so worst-case added
-            // latency matches the Linux build's own epoll timer tick.
-            // Kept short — not 50ms — because that 50ms ceiling beats
-            // against ping's 1s interval and shows up as a sawtooth
-            // in RTT measurements even though poll() itself wakes
-            // immediately on data; see on_udp()'s and send_vpn()'s
-            // callers for the actual per-packet path.)
+            WaitForMultipleObjects(2, waitHandles, FALSE, 100);
+
+            // Drain both unconditionally on every wake (timeout, TUN
+            // event, or UDP event) — WaitForMultipleObjects only reports
+            // one signaled handle even when both are ready.
             for (;;) {
                 DWORD sz = 0;
                 uint8_t* p = g_wintun.ReceivePacket(wintun_session, &sz);
@@ -1704,17 +1731,14 @@ struct Client {
                 g_wintun.ReleaseReceivePacket(wintun_session, p);
             }
 
-            // UDP -> dispatch
-            pollfd pfd{}; pfd.fd = (SOCKET)udp_fd; pfd.events = POLLIN;
-            if (poll(&pfd, 1, 5) > 0 && (pfd.revents & POLLIN)) {
-                for (;;) {
-                    sockaddr_in from{}; int fl = sizeof(from);
-                    int r = recvfrom(udp_fd, (char*)tbuf, (int)sizeof(tbuf),
-                                      0, (sockaddr*)&from, &fl);
-                    if (r <= 0) break;
-                    on_udp(tbuf, (size_t)r, from);
-                }
+            for (;;) {
+                sockaddr_in from{}; int fl = sizeof(from);
+                int r = recvfrom(udp_fd, (char*)tbuf, (int)sizeof(tbuf),
+                                  0, (sockaddr*)&from, &fl);
+                if (r <= 0) break;
+                on_udp(tbuf, (size_t)r, from);
             }
+            WSAResetEvent(hUdpEvt);
 
             char c = g_stdin_cmd.exchange(0, std::memory_order_relaxed);
             if (c) {
@@ -1781,17 +1805,23 @@ struct Client {
         epoll_event events[16];
 
         while (!g_quit) {
-            // epoll with 5ms timeout for timers (was 50ms — that ceiling
-            // beats against ping's 1s interval and shows up as periodic
-            // sawtooth/plateau RTT patterns even though epoll_wait()
-            // itself wakes immediately once data is actually pending)
-            int n = epoll_wait(ep_fd, events, 16, 5);
+            // Block indefinitely — no polling ceiling at all. timer_fd
+            // (added in setup_epoll(), fires every 100ms) guarantees a
+            // wakeup for tick_timers() even with zero packet traffic;
+            // tun_fd/udp_fd wake immediately the instant real data
+            // arrives, so packet latency is no longer bounded by any
+            // fixed tick interval.
+            int n = epoll_wait(ep_fd, events, 16, -1);
             if (n < 0) { if (errno==EINTR) continue; break; }
 
             for (int i = 0; i < n; i++) {
                 int fd = events[i].data.fd;
 
-                if (fd == tun_fd) {
+                if (fd == timer_fd) {
+                    uint64_t fires;
+                    (void)!read(timer_fd, &fires, sizeof(fires)); // clear level-triggered fd
+
+                } else if (fd == tun_fd) {
                     // TUN → VPN: drain all pending packets (EPOLLET)
                     while (true) {
                         ssize_t r = read(tun_fd, tbuf, sizeof(tbuf));
@@ -2201,7 +2231,18 @@ int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str,
     };
 
 #ifdef _WIN32
+    static uint8_t ubuf[65536];
+
+    // Same event-driven wait as Client::run() — real Wintun/socket
+    // events instead of a fixed poll ceiling on packet latency.
+    HANDLE hTunEvt = g_wintun.GetReadWaitEvent(cli.wintun_session);
+    WSAEVENT hUdpEvt = WSACreateEvent();
+    WSAEventSelect((SOCKET)cli.udp_fd, hUdpEvt, FD_READ);
+    HANDLE waitHandles[2] = { hTunEvt, (HANDLE)hUdpEvt };
+
     while (!g_quit) {
+        WaitForMultipleObjects(2, waitHandles, FALSE, 100);
+
         // TUN -> VPN: drain everything currently queued in the Wintun ring.
         for (;;) {
             DWORD sz = 0;
@@ -2215,16 +2256,13 @@ int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str,
         }
 
         // UDP -> dispatch
-        static uint8_t ubuf[65536];
-        pollfd pfd{}; pfd.fd = (SOCKET)cli.udp_fd; pfd.events = POLLIN;
-        if (poll(&pfd, 1, 5) > 0 && (pfd.revents & POLLIN)) {
-            for (;;) {
-                sockaddr_in from{}; int fl = sizeof(from);
-                int r = recvfrom(cli.udp_fd, (char*)ubuf, (int)sizeof(ubuf), 0, (sockaddr*)&from, &fl);
-                if (r <= 0) break;
-                cli.on_udp(ubuf, (size_t)r, from);
-            }
+        for (;;) {
+            sockaddr_in from{}; int fl = sizeof(from);
+            int r = recvfrom(cli.udp_fd, (char*)ubuf, (int)sizeof(ubuf), 0, (sockaddr*)&from, &fl);
+            if (r <= 0) break;
+            cli.on_udp(ubuf, (size_t)r, from);
         }
+        WSAResetEvent(hUdpEvt);
 
         cli.tick_p2p();
         retry_and_report();
@@ -2241,12 +2279,19 @@ int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str,
     epoll_event events[16];
 
     while (!g_quit) {
-        int n = epoll_wait(cli.ep_fd, events, 16, 5);
+        // Block indefinitely — timer_fd (set up in cli.setup_epoll())
+        // fires every 100ms to drive tick_p2p()/retry_and_report() even
+        // with no traffic; tun_fd/udp_fd wake immediately on real data,
+        // so no fixed polling ceiling sits on packet latency.
+        int n = epoll_wait(cli.ep_fd, events, 16, -1);
         if (n < 0) { if (errno == EINTR) continue; break; }
 
         for (int i = 0; i < n; i++) {
             int fd = events[i].data.fd;
-            if (fd == cli.tun_fd) {
+            if (fd == cli.timer_fd) {
+                uint64_t fires;
+                (void)!read(cli.timer_fd, &fires, sizeof(fires));
+            } else if (fd == cli.tun_fd) {
                 while (true) {
                     ssize_t r = read(cli.tun_fd, tbuf, sizeof(tbuf));
                     if (r <= 0) break;
