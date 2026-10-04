@@ -1115,6 +1115,9 @@ struct Peer {
     uint64_t    t_ka      = 0;  // last keepalive sent to peer
     int         punch_n   = 0;  // total punch attempts in current episode
     bool        gave_up   = false; // true: no auto-retry, wait for 'f'
+    int         nat_delta = 0;  // peer's reported symmetric-NAT port
+                                 // increment (0 = none/unknown) — see
+                                 // p2p_detect_nat_delta()
 
     bool direct() const { return st == P2PSt::DIRECT; }
 };
@@ -1537,6 +1540,28 @@ struct Client {
                         usend(udp_fd, &pk, sizeof(pk), adj);
                     }
 
+                    // Wide prediction using the PEER's own measured NAT
+                    // increment (see p2p_detect_nat_delta()): when the
+                    // peer's symmetric NAT steps its external port by a
+                    // fixed amount per new mapping (common on carrier/
+                    // CGNAT symmetric NATs, e.g. port 51001 → 15502 is
+                    // useless to guess by ±8 but IS a fixed step they
+                    // reported to us in their token), fan out further
+                    // guesses at multiples of that step either side of
+                    // the port we were told about. Still cheap: 40 tiny
+                    // UDP packets.
+                    if (p.nat_delta != 0) {
+                        for (int k = 1; k <= 20; k++) {
+                            for (int sign : {1,-1}) {
+                                int port = (int)ntohs(p.addr.sin_port) + sign*k*p.nat_delta;
+                                if (port < 1 || port > 65535) continue;
+                                sockaddr_in adj = p.addr;
+                                adj.sin_port = htons((uint16_t)port);
+                                usend(udp_fd, &pk, sizeof(pk), adj);
+                            }
+                        }
+                    }
+
                     p.punch_n++;
                     p.t_punch = now;
 
@@ -1900,7 +1925,7 @@ struct Client {
 // Single UDP port carries everything: STUN query, punch, keepalive, and
 // the actual VPN data once direct — see the root README's Abstract.
 //
-// Token payload: "id,pub_ip,pub_port,vpn_ip,node_id[,lan_ip,lan_port]",
+// Token payload: "id,pub_ip,pub_port,vpn_ip,node_id[,lan_ip,lan_port[,nat_delta]]",
 // base64-encoded — the pieces Client::on_peer_info() would normally learn
 // from a server's PEER_INFO packet, learned here from the peer directly
 // instead. The optional lan_ip/lan_port let two peers behind the SAME
@@ -1999,6 +2024,42 @@ bool p2p_get_public_address(std::string& ip_out, uint16_t& port_out, int sock) {
     return p2p_parse_stun_response(resp, n, ip_out, port_out);
 }
 
+// Detect whether THIS host's NAT allocates external UDP ports in a
+// predictable sequence. Many "symmetric" NATs (common on carrier/mobile
+// and some CGNATs) hand out a *different* external port per destination
+// instead of reusing the one the local socket is bound to — which is
+// exactly why plain ±8 port-prediction (and matching the token's bound
+// local port at all) can fail completely, as seen when one side's local
+// bind of 51001 came back from STUN as external port 15502 with no
+// relation to 51001.
+//
+// We can't ask the NAT directly, but we CAN measure it: open two more
+// throwaway sockets on two adjacent local ports and ask the STUN server
+// what external port each gets. If the NAT's allocator is sequential
+// (most are, even when the base offset is unpredictable), the external
+// ports differ by a roughly fixed amount — that amount is what the OTHER
+// peer needs to fan its guesses out by, so we ship it to them in our
+// token. Returns 0 if undetectable (STUN failed, or the public IP itself
+// changed between queries, meaning the measurement isn't trustworthy).
+int p2p_detect_nat_delta(uint16_t base_local_port) {
+    uint16_t lp1 = (uint16_t)(base_local_port + 111);
+    uint16_t lp2 = (uint16_t)(base_local_port + 112);
+    int s1 = -1, s2 = -1;
+    bool ok = true;
+    try { s1 = open_udp(lp1, true); } catch (...) { ok = false; }
+    if (ok) { try { s2 = open_udp(lp2, true); } catch (...) { ok = false; } }
+
+    std::string ip1, ip2; uint16_t ext1 = 0, ext2 = 0;
+    if (ok) ok = p2p_get_public_address(ip1, ext1, s1) &&
+                 p2p_get_public_address(ip2, ext2, s2);
+
+    if (s1 >= 0) CLOSESOCK(s1);
+    if (s2 >= 0) CLOSESOCK(s2);
+
+    if (!ok || ip1.empty() || ip1 != ip2) return 0;
+    return (int)ext2 - (int)ext1;
+}
+
 // Token codec: base64("id,ip,port,vpn_ip,node_id") — a compact,
 // copy-pasteable string a person hands their peer directly (chat, email,
 // voice), instead of a rendezvous server sending PEER_INFO.
@@ -2047,14 +2108,18 @@ struct P2PPeerToken {
     uint32_t    node_id;
     std::string lan_ip;   // optional — empty if peer couldn't determine one
     uint16_t    lan_port = 0;
+    int         nat_delta = 0; // sender's measured symmetric-NAT port
+                                // step, see p2p_detect_nat_delta() (0 =
+                                // none/unknown)
 };
 
 std::string p2p_make_token(const std::string& id, const std::string& ip, uint16_t port,
                             uint32_t vpn_ip, uint32_t node_id,
-                            const std::string& lan_ip, uint16_t lan_port) {
+                            const std::string& lan_ip, uint16_t lan_port,
+                            int nat_delta) {
     std::string payload = id + "," + ip + "," + std::to_string(port) + "," +
         std::to_string(vpn_ip) + "," + std::to_string(node_id) + "," +
-        lan_ip + "," + std::to_string(lan_port);
+        lan_ip + "," + std::to_string(lan_port) + "," + std::to_string(nat_delta);
     return p2p_base64_encode(payload);
 }
 
@@ -2068,17 +2133,19 @@ bool p2p_parse_token(const std::string& token, P2PPeerToken& out) {
             start = i + 1;
         }
     }
-    if (f.size() != 5 && f.size() != 7) return false;
+    if (f.size() != 5 && f.size() != 7 && f.size() != 8) return false;
     try {
         out.id      = f[0];
         out.ip      = f[1];
         out.port    = static_cast<uint16_t>(std::stoi(f[2]));
         out.vpn_ip  = static_cast<uint32_t>(std::stoul(f[3]));
         out.node_id = static_cast<uint32_t>(std::stoul(f[4]));
-        if (f.size() == 7 && !f[5].empty() && !f[6].empty()) {
+        if ((f.size() == 7 || f.size() == 8) && !f[5].empty() && !f[6].empty()) {
             out.lan_ip   = f[5];
             out.lan_port = static_cast<uint16_t>(std::stoi(f[6]));
         }
+        if (f.size() == 8 && !f[7].empty())
+            out.nat_delta = std::stoi(f[7]);
     } catch (...) {
         return false;
     }
@@ -2119,8 +2186,18 @@ int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str,
         printf("[Decentralized] LAN address (fallback for same-router peers): %s:%u\n",
                lan_ip.c_str(), local_udp_port);
 
+    // Measure our own NAT's port-allocation behavior so a peer behind a
+    // symmetric NAT that remaps our STUN-reported port to something
+    // unrelated (e.g. bound 51001 → external 15502) can still fan out
+    // wide, step-based punch guesses instead of giving up after a plain
+    // ±8 search. See p2p_detect_nat_delta()'s comment for why.
+    int nat_delta = p2p_detect_nat_delta(local_udp_port);
+    if (nat_delta != 0)
+        printf("[Decentralized] NAT allocates ports in steps of %d — sharing that "
+               "with peers so they can punch wide if needed\n", nat_delta);
+
     std::string my_token = p2p_make_token(self_id, pub_ip, pub_port, cli.my_vpn, cli.my_node,
-                                           lan_ip, local_udp_port);
+                                           lan_ip, local_udp_port, nat_delta);
     printf("\n============================================================\n"
            " Step 1 — send this token to EVERY peer you want to mesh with\n"
            " (chat, email, voice):\n"
@@ -2186,6 +2263,7 @@ int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str,
             if (inet_pton(AF_INET, peer.lan_ip.c_str(), &p.lan_addr.sin_addr) == 1)
                 p.has_lan = true;
         }
+        p.nat_delta = peer.nat_delta;
         p.st = P2PSt::PUNCHING;
         p.t_pstart = now_ms();
         cli.peers[peer.node_id] = p;
