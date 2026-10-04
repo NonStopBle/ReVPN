@@ -1062,6 +1062,8 @@ struct Peer {
     sockaddr_in addr;
     uint32_t    vpn_ip;
     uint32_t    node_id;
+    sockaddr_in lan_addr{};     // optional same-LAN candidate (hairpin-NAT fallback)
+    bool        has_lan  = false;
     P2PSt       st        = P2PSt::NONE;
     uint64_t    t_pstart  = 0;  // when PUNCHING began
     uint64_t    t_punch   = 0;  // last punch sent
@@ -1434,6 +1436,10 @@ struct Client {
                     PunchPkt pk{}; pk.type = MSG_PUNCH; pk.node_id = my_node;
                     usend(udp_fd, &pk, sizeof(pk), p.addr);
 
+                    // Same-LAN candidate (hairpin-NAT fallback) — exact
+                    // port, no prediction needed, it's not NAT'd.
+                    if (p.has_lan) usend(udp_fd, &pk, sizeof(pk), p.lan_addr);
+
                     // Symmetric NAT port prediction: try ±8 from known port
                     // Sequential NATs allocate ports +1 each connection.
                     // We send 16 extra probes — cheap since they're tiny UDP packets.
@@ -1788,13 +1794,39 @@ struct Client {
 // Single UDP port carries everything: STUN query, punch, keepalive, and
 // the actual VPN data once direct — see the root README's Abstract.
 //
-// Token payload: "id,ip,port,vpn_ip,node_id", base64-encoded — the pieces
-// Client::on_peer_info() would normally learn from a server's PEER_INFO
-// packet, learned here from the peer directly instead.
+// Token payload: "id,pub_ip,pub_port,vpn_ip,node_id[,lan_ip,lan_port]",
+// base64-encoded — the pieces Client::on_peer_info() would normally learn
+// from a server's PEER_INFO packet, learned here from the peer directly
+// instead. The optional lan_ip/lan_port let two peers behind the SAME
+// router (same pub_ip) connect without relying on NAT hairpinning, which
+// many consumer routers don't support — without it, both sides punch
+// forever (TX climbing, RX stuck at 0) because packets addressed to your
+// own public IP from inside the same LAN never make the round trip back
+// in. tick_p2p() punches both candidates; whichever answers first wins.
 // =============================================================================
 #define P2P_MAGIC_COOKIE 0x2112A442
 #define P2P_STUN_SERVER_IP "74.125.250.129" // stun.l.google.com, one of several A records
 #define P2P_STUN_SERVER_PORT 19302
+
+// Best-effort local (LAN-facing) IPv4 address, for the hairpin-NAT fallback
+// above. UDP connect() just picks a route/source address via the routing
+// table — no packet is actually sent to 8.8.8.8.
+std::string p2p_get_local_ip() {
+    int s = (int)socket(AF_INET, SOCK_DGRAM, 0);
+    if (s < 0) return "";
+    sockaddr_in remote{};
+    remote.sin_family = AF_INET;
+    remote.sin_port   = htons(53);
+    remote.sin_addr.s_addr = inet_addr("8.8.8.8");
+    if (connect(s, (sockaddr*)&remote, sizeof(remote)) != 0) { CLOSESOCK(s); return ""; }
+    sockaddr_in local{};
+    socklen_t len = sizeof(local);
+    if (getsockname(s, (sockaddr*)&local, &len) != 0) { CLOSESOCK(s); return ""; }
+    CLOSESOCK(s);
+    char buf[INET_ADDRSTRLEN];
+    if (!inet_ntop(AF_INET, &local.sin_addr, buf, sizeof(buf))) return "";
+    return std::string(buf);
+}
 
 bool p2p_parse_stun_response(const uint8_t* resp, size_t len, std::string& ip_out, uint16_t& port_out) {
     if (len < 20) return false;
@@ -1907,12 +1939,16 @@ struct P2PPeerToken {
     uint16_t    port;
     uint32_t    vpn_ip;   // network byte order, same as RegPkt::vpn_ip
     uint32_t    node_id;
+    std::string lan_ip;   // optional — empty if peer couldn't determine one
+    uint16_t    lan_port = 0;
 };
 
 std::string p2p_make_token(const std::string& id, const std::string& ip, uint16_t port,
-                            uint32_t vpn_ip, uint32_t node_id) {
+                            uint32_t vpn_ip, uint32_t node_id,
+                            const std::string& lan_ip, uint16_t lan_port) {
     std::string payload = id + "," + ip + "," + std::to_string(port) + "," +
-        std::to_string(vpn_ip) + "," + std::to_string(node_id);
+        std::to_string(vpn_ip) + "," + std::to_string(node_id) + "," +
+        lan_ip + "," + std::to_string(lan_port);
     return p2p_base64_encode(payload);
 }
 
@@ -1926,13 +1962,17 @@ bool p2p_parse_token(const std::string& token, P2PPeerToken& out) {
             start = i + 1;
         }
     }
-    if (f.size() != 5) return false;
+    if (f.size() != 5 && f.size() != 7) return false;
     try {
         out.id      = f[0];
         out.ip      = f[1];
         out.port    = static_cast<uint16_t>(std::stoi(f[2]));
         out.vpn_ip  = static_cast<uint32_t>(std::stoul(f[3]));
         out.node_id = static_cast<uint32_t>(std::stoul(f[4]));
+        if (f.size() == 7 && !f[5].empty() && !f[6].empty()) {
+            out.lan_ip   = f[5];
+            out.lan_port = static_cast<uint16_t>(std::stoi(f[6]));
+        }
     } catch (...) {
         return false;
     }
@@ -1968,7 +2008,13 @@ int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str,
     }
     printf("[Decentralized] Public address (via STUN): %s:%u\n", pub_ip.c_str(), pub_port);
 
-    std::string my_token = p2p_make_token(self_id, pub_ip, pub_port, cli.my_vpn, cli.my_node);
+    std::string lan_ip = p2p_get_local_ip();
+    if (!lan_ip.empty())
+        printf("[Decentralized] LAN address (fallback for same-router peers): %s:%u\n",
+               lan_ip.c_str(), local_udp_port);
+
+    std::string my_token = p2p_make_token(self_id, pub_ip, pub_port, cli.my_vpn, cli.my_node,
+                                           lan_ip, local_udp_port);
     printf("\n============================================================\n"
            " Step 1 — send this token to EVERY peer you want to mesh with\n"
            " (chat, email, voice):\n"
@@ -2028,6 +2074,12 @@ int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str,
         p.addr.sin_family = AF_INET;
         p.addr.sin_port = htons(peer.port);
         inet_pton(AF_INET, peer.ip.c_str(), &p.addr.sin_addr);
+        if (!peer.lan_ip.empty() && peer.lan_port != 0) {
+            p.lan_addr.sin_family = AF_INET;
+            p.lan_addr.sin_port   = htons(peer.lan_port);
+            if (inet_pton(AF_INET, peer.lan_ip.c_str(), &p.lan_addr.sin_addr) == 1)
+                p.has_lan = true;
+        }
         p.st = P2PSt::PUNCHING;
         p.t_pstart = now_ms();
         cli.peers[peer.node_id] = p;

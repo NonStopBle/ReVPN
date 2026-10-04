@@ -405,6 +405,20 @@ No arguments? The TUI has a **Decentralized** entry on the main menu
 that asks for your name and VPN IP, then walks you through the same
 token exchange on a plain screen.
 
+**Two peers behind the same router?** The token also carries each
+side's LAN-facing IP, not just its public one — so if you and a peer
+are testing from two machines on the same home/office network (same
+public IP as seen by STUN), punching tries the LAN address too instead
+of relying only on the public one. That matters because a lot of
+consumer routers don't support NAT hairpinning (a packet from inside
+the LAN addressed to the router's *own* public IP, meant to be routed
+back to another device on the same LAN, silently gets dropped) — which
+looks exactly like "TX keeps climbing, RX stays at 0 forever, punch
+never succeeds" even though both sides are on, firewalled correctly,
+and sending. If you hit that symptom with two peers on the same
+network, update to a build with this fix (older tokens lack the LAN
+fields and fall back to public-only punching).
+
 ```
 --vpn-ip     ip     This node's VPN IP, e.g. 10.13.0.2       (required)
 --id         name   Your display name, shown in the token    (required)
