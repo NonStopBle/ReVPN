@@ -264,7 +264,9 @@ CLIENT OPTIONS:
   --subnet <n>         VPN network prefix length              (default: ${SUBNET})
   --port <n>           Local UDP port                          (default: 51820)
   --node-id <hex>      Fixed 32-bit node id (default: derived from --vpn-ip)
-  --mtu <n>            TUN interface MTU                       (default: ${MTU})
+  --mtu <n>            TUN interface MTU, 576-9216              (default: ${MTU})
+                       1500 for same-LAN peers, up to 9000 for jumbo
+                       frames IF every hop on the real path supports them
   --encrypt <true|false>  Encrypt tunnel traffic               (default: ${ENCRYPT})
   --relay-only         Never attempt direct UDP hole punching,
                        always relay through the server

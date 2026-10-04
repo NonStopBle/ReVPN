@@ -52,6 +52,7 @@ set "WORKERS=4"
 set "VPN_IP="
 set "CONNECT="
 set "SUBNET=16"
+set "MTU=1380"
 set "ENCRYPT=true"
 set "RELAY_ONLY=false"
 set "MODE="
@@ -73,6 +74,7 @@ if /i "%~1"=="--workers"    (set "WORKERS=%~2"  & shift & shift & goto PARSE)
 if /i "%~1"=="--connect"    (set "CONNECT=%~2"  & shift & shift & goto PARSE)
 if /i "%~1"=="--vpn-ip"     (set "VPN_IP=%~2"   & shift & shift & goto PARSE)
 if /i "%~1"=="--subnet"     (set "SUBNET=%~2"   & shift & shift & goto PARSE)
+if /i "%~1"=="--mtu"        (set "MTU=%~2"      & shift & shift & goto PARSE)
 if /i "%~1"=="--encrypt"    (set "ENCRYPT=%~2"  & shift & shift & goto PARSE)
 if /i "%~1"=="--relay-only" (set "RELAY_ONLY=true" & shift & goto PARSE)
 if /i "%~1"=="--id"         (set "DC_ID=%~2"    & shift & shift & goto PARSE)
@@ -134,6 +136,9 @@ if /i "%ASPEER%"=="y" (
     set "SUBNET_IN="
     set /p "SUBNET_IN=VPN network prefix length [!SUBNET!]: "
     if not "!SUBNET_IN!"=="" set "SUBNET=!SUBNET_IN!"
+    set "MTU_IN="
+    set /p "MTU_IN=TUN MTU, 576-9216 - 1380 is safe over the internet, 1500 for same-LAN, up to 9000 for jumbo frames if every hop supports them [!MTU!]: "
+    if not "!MTU_IN!"=="" set "MTU=!MTU_IN!"
 ) else (
     set "VPN_IP="
 )
@@ -141,7 +146,7 @@ echo.
 echo Start Server:
 echo   Port    : %PORT%
 echo   Workers : %WORKERS%
-if "%VPN_IP%"=="" (echo   VPN IP  : None ^(pure bridge^)) else (echo   VPN IP  : %VPN_IP%/%SUBNET%  ^(server joins as a peer^))
+if "%VPN_IP%"=="" (echo   VPN IP  : None ^(pure bridge^)) else (echo   VPN IP  : %VPN_IP%/%SUBNET%  ^(server joins as a peer, MTU %MTU%^))
 set /p "CONFIRM=Proceed? (Y/n): "
 if /i "%CONFIRM%"=="n" goto MENU
 goto RUNSERVER
@@ -159,6 +164,9 @@ if not "%VPN_IP_IN%"=="" set "VPN_IP=%VPN_IP_IN%"
 set "SUBNET_IN="
 set /p "SUBNET_IN=VPN network prefix length [%SUBNET%]: "
 if not "%SUBNET_IN%"=="" set "SUBNET=%SUBNET_IN%"
+set "MTU_IN="
+set /p "MTU_IN=TUN MTU, 576-9216 - 1380 is safe over the internet, 1500 for same-LAN, up to 9000 for jumbo frames if every hop supports them [%MTU%]: "
+if not "%MTU_IN%"=="" set "MTU=%MTU_IN%"
 set /p "ENC=Encrypt tunnel traffic? (Y/n): "
 if /i "%ENC%"=="n" (set "ENCRYPT=false") else (set "ENCRYPT=true")
 set /p "PUNCH=Try direct UDP hole punching first, auto relay fallback? (Y/n): "
@@ -177,6 +185,7 @@ echo.
 echo Join as Client:
 echo   Server  : %CONNECT%
 echo   VPN IP  : %VPN_IP%/%SUBNET%
+echo   MTU     : %MTU%
 echo   Encrypt : %ENCRYPT%
 if /i "%PORT_SET%"=="true" (echo   Local port : %PORT%) else (echo   Local port : ^(engine default, 51820^))
 if "%RELAY_ONLY%"=="true" (echo   Mode    : relay-only) else (echo   Mode    : p2p + auto relay fallback)
@@ -198,6 +207,9 @@ if not "%VPN_IP_IN%"=="" set "VPN_IP=%VPN_IP_IN%"
 set "SUBNET_IN="
 set /p "SUBNET_IN=VPN network prefix length [%SUBNET%]: "
 if not "%SUBNET_IN%"=="" set "SUBNET=%SUBNET_IN%"
+set "MTU_IN="
+set /p "MTU_IN=TUN MTU, 576-9216 - 1380 is safe over the internet, 1500 for same-LAN, up to 9000 for jumbo frames if every hop supports them [%MTU%]: "
+if not "%MTU_IN%"=="" set "MTU=%MTU_IN%"
 set /p "ENC=Encrypt tunnel traffic? (Y/n): "
 if /i "%ENC%"=="n" (set "ENCRYPT=false") else (set "ENCRYPT=true")
 if /i "%PORT_SET%"=="false" set "PORT=51001"
@@ -221,6 +233,7 @@ echo.
 echo Connect directly to a peer - no server:
 echo   Your name : %DC_ID%
 echo   VPN IP    : %VPN_IP%/%SUBNET%
+echo   MTU       : %MTU%
 echo   Encrypt   : %ENCRYPT%
 if /i "%PORT_SET%"=="true" (echo   Local port : %PORT%) else (echo   Local port : ^(engine default, 51001^))
 if not "%DC_SESSION%"=="" (echo   Session : %DC_SESSION%) else (echo   Session : off ^(always re-paste tokens^))
@@ -237,7 +250,7 @@ REM Launchers
 REM ============================================================================
 :RUNSERVER
 set "SELFPEER="
-if not "%VPN_IP%"=="" set "SELFPEER=--vpn-ip %VPN_IP% --subnet %SUBNET%"
+if not "%VPN_IP%"=="" set "SELFPEER=--vpn-ip %VPN_IP% --subnet %SUBNET% --mtu %MTU%"
 if "%VPN_IP%"=="" (
     echo ReVPN: starting server on 0.0.0.0:%PORT% ^(%WORKERS% workers^)
 ) else (
@@ -263,7 +276,7 @@ set "PORTFLAG="
 if /i "%PORT_SET%"=="true" set "PORTFLAG=--port %PORT%"
 echo ReVPN: joining %CONNECT% as %VPN_IP%/%SUBNET%  (mode=%COMM%, encrypt=%ENCRYPT%)
 if /i "%COMM%"=="p2p" echo ReVPN: will try direct UDP hole punching, auto-relay on failure
-"%ENGINE%" --mode client --vpn-ip %VPN_IP% --server %CONNECT% --comm %COMM% --subnet %SUBNET% %ENCFLAG% %PORTFLAG%
+"%ENGINE%" --mode client --vpn-ip %VPN_IP% --server %CONNECT% --comm %COMM% --subnet %SUBNET% --mtu %MTU% %ENCFLAG% %PORTFLAG%
 exit /b %ERRORLEVEL%
 
 :RUNDECENTRALIZED
@@ -285,7 +298,7 @@ if not "%DC_SESSION%"=="" (
     echo ReVPN: reconnect-on-restart enabled - session file: %DC_SESSION%
 )
 echo ReVPN: decentralized mode - no server, direct token exchange with your peer(s)
-"%ENGINE%" --mode decentralized --id %DC_ID% --vpn-ip %VPN_IP% --subnet %SUBNET%!PEER_TOKENS! %ENCFLAG% %PORTFLAG% %SESSFLAG%
+"%ENGINE%" --mode decentralized --id %DC_ID% --vpn-ip %VPN_IP% --subnet %SUBNET% --mtu %MTU%!PEER_TOKENS! %ENCFLAG% %PORTFLAG% %SESSFLAG%
 exit /b %ERRORLEVEL%
 
 REM ============================================================================
@@ -306,11 +319,16 @@ echo   --workers ^<n^>       Server worker threads          (default: 4)
 echo   --vpn-ip ^<ip^>       Also join the mesh as a peer, reachable
 echo                       at this VPN IP (default: pure bridge, no TUN)
 echo   --subnet ^<n^>        VPN network prefix length, with --vpn-ip (default: 16)
+echo   --mtu ^<n^>           TUN MTU, with --vpn-ip, 576-9216        (default: 1380)
 echo.
 echo CLIENT OPTIONS:
 echo   --connect ^<ip:port^>  Address of the ReVPN server to join    (required)
 echo   --vpn-ip ^<ip^>        This node's VPN IP, e.g. 10.13.0.2      (required)
 echo   --subnet ^<n^>         VPN network prefix length              (default: 16)
+echo   --mtu ^<n^>            TUN MTU, 576-9216 - 1380 is safe over the
+echo                         internet, 1500 for same-LAN, up to 9000 for
+echo                         jumbo frames IF every hop on the real path
+echo                         supports them                    (default: 1380)
 echo   --port ^<n^>           Local UDP port this client binds/punches
 echo                         from - pick your own for a stable
 echo                         firewall/port-forward rule across restarts
@@ -322,6 +340,7 @@ echo DECENTRALIZED OPTIONS:
 echo   --id ^<name^>          Your display name in the token          (required)
 echo   --vpn-ip ^<ip^>        This node's VPN IP, e.g. 10.13.0.2       (required)
 echo   --subnet ^<n^>         VPN network prefix length               (default: 16)
+echo   --mtu ^<n^>            TUN MTU, 576-9216                       (default: 1380)
 echo   --port ^<n^>           Local UDP port used for STUN + punching -
 echo                        pick your own for a stable firewall/
 echo                        port-forward rule across restarts

@@ -452,8 +452,19 @@ flapping was almost certainly the cause.
 paths (PPPoE and other overhead-heavy links often can't do a full 1500
 end-to-end, and ReVPN doesn't fragment — an oversized packet just gets
 dropped). Pass `--mtu 1500` when you know the full path supports it, e.g.
-two peers on the same LAN/switch — packet buffers are sized to take the
-full 1500 safely either way.
+two peers on the same LAN/switch.
+
+`--mtu` isn't capped at 1500, though — any value from 576 up to **9216**
+is accepted (packet buffers are sized for it), covering jumbo frames
+(2048, 9000, etc.) for links that actually support them, e.g. a
+datacenter/LAN segment with jumbo frames enabled. A value outside
+576–9216 is rejected at startup with a clear error instead of silently
+truncating every oversized packet later. The catch is the same as always:
+**every** hop on the real path — both ends' physical NICs, any switches
+in between, and this VPN's own `--mtu` on *both* sides — has to agree on
+the larger size, or packets above the smallest hop's real limit just get
+dropped with no automatic fallback. If you're not sure the whole path
+supports it, stick to 1500 or lower.
 
 ```
 --vpn-ip     ip     This node's VPN IP, e.g. 10.13.0.2       (required)

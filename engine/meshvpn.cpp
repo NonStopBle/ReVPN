@@ -250,13 +250,21 @@ struct __attribute__((packed)) DataHdr {
 static constexpr size_t DHSZ = sizeof(DataHdr); // 11
 
 // Largest IP packet (TUN payload) ReVPN will carry — must stay >= the
-// largest --mtu anyone passes. Packet buffers are sized MAX_TUN_PKT+DHSZ+8
-// (header + AEAD-placeholder nonce). Raising this does NOT raise the
-// default TUN MTU (still 1380, chosen to avoid fragmentation on real
-// internet paths with sub-1500 links, e.g. PPPoE) — it just means
-// --mtu up to 1500 (e.g. for same-LAN / same-switch peers where the
-// full path MTU is a known 1500) no longer gets silently truncated.
-static constexpr size_t MAX_TUN_PKT = 1500;
+// largest --mtu anyone passes, since Client::send_vpn()/inject_tun() and
+// Server::handle_packet() all size their packet buffers off this constant
+// (MAX_TUN_PKT+DHSZ+8: header + AEAD-placeholder nonce), not off whatever
+// --mtu was actually given. Raising this does NOT raise the default TUN
+// MTU (still 1380, chosen to avoid fragmentation on real internet paths
+// with sub-1500 links, e.g. PPPoE) — it just raises the ceiling on what
+// --mtu is *allowed* to be before packets silently get truncated.
+//
+// 9216 covers standard jumbo frames (9000) plus headroom — the common
+// ceiling for same-LAN/same-switch/DC links with jumbo frames enabled
+// end-to-end (NICs, switches, and this VPN's own MTU all need to agree;
+// a mismatch anywhere on the path causes drops, not a slow fallback).
+// --mtu above the plain-Ethernet 1500 only helps when every hop on your
+// actual path — not just this VPN — already supports the larger frame.
+static constexpr size_t MAX_TUN_PKT = 9216;
 
 // ── Crypto placeholder (XOR — replace with AES-256-GCM via OpenSSL) ───────────
 static const uint8_t XK[32] = {
@@ -2532,8 +2540,11 @@ static void usage(const char* p) {
     printf("  --subnet   n        VPN prefix length       (default 16)\n");
     printf("  --node-id  hex      32-bit node ID          (default auto)\n");
     printf("  --no-encrypt        Disable encryption\n");
-    printf("  --mtu      n        TUN MTU, up to 1500      (default 1380 - safe\n");
-    printf("                      over the internet; use 1500 for same-LAN peers)\n");
+    printf("  --mtu      n        TUN MTU, up to 9216      (default 1380 - safe\n");
+    printf("                      over the internet; use 1500 for same-LAN peers,\n");
+    printf("                      or up to 9000 for jumbo frames IF every hop on\n");
+    printf("                      the real path — NICs, switches, this VPN's MTU\n");
+    printf("                      on BOTH ends — already agrees, or packets drop)\n");
     printf("  --id         name   (decentralized) your display name in the token\n");
     printf("  --vpn-ip     ip     (decentralized) this node's VPN IP, e.g. 10.13.0.2\n");
     printf("  --port       n      (decentralized) local UDP port          (default 51001)\n");
@@ -2688,6 +2699,17 @@ int main(int argc, char* argv[]) {
         else if (a=="--session"     &&i+1<argc) session_file=argv[++i];
         else if (a=="--help"||a=="-h") { usage(argv[0]); return 0; }
         else { fprintf(stderr,"Unknown: %s\n",a.c_str()); return 1; }
+    }
+
+    // Fail loudly instead of silently truncating every packet above
+    // MAX_TUN_PKT — that failure mode is "traffic mysteriously corrupts
+    // above N bytes", much nastier to debug than a flat refusal to start.
+    // 576 is the smallest MTU any IPv4 path is required to support.
+    if (mtu < 576 || (size_t)mtu > MAX_TUN_PKT) {
+        fprintf(stderr, "--mtu %d is out of range — must be 576-%zu "
+                "(this build's packet buffers are sized for %zu)\n",
+                mtu, MAX_TUN_PKT, MAX_TUN_PKT);
+        return 1;
     }
 
     if (mode == "decentralized") {
