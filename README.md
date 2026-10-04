@@ -462,12 +462,50 @@ full 1500 safely either way.
 --peer-token <tok>  A peer's token, as a flag instead of being prompted
                      for it. Repeat the flag (or comma-separate) for a
                      mesh of 3+ peers.
+--session <file>    Auto-reconnect on restart (opt-in) — see below.
 --encrypt <true|false>  Encrypt tunnel traffic               (default: true)
 ```
 
-There's no relay to fall back on here — if the direct UDP path ever
-dies on both sides (NAT remapped, network changed), the fix is a
-fresh token exchange and a restart, not a server hop.
+There's no relay to fall back on here, so decentralized mode's
+reconnection story splits into two very different cases:
+
+**1. Connection lost while both processes keep running** (network blip,
+Wi-Fi roam, NAT keepalive hiccup) — this is already automatic, no flag
+needed. A direct link that goes silent for 3s drops to `FALLBACK` and
+retries the punch every 10s, forever, in the background — you'll see
+`[Decentralized] Retrying punch to 0x...` in the log and it reconnects
+on its own the moment packets can flow again. The NAT-delta wide
+port-prediction from the symmetric-NAT section above runs on every one
+of those retries too, not just the first attempt.
+
+**2. The process itself was killed or restarted** (crash, `Ctrl+C`,
+`systemctl restart`, the machine rebooted) — this is the case where
+you'd otherwise have to re-paste every peer's token from scratch,
+since nothing survives the exchange by default. `--session <file>`
+fixes that:
+
+```sh
+./ReVPN.sh --decentralized --id alice --vpn-ip 10.13.0.2 --session ./config/alice.session
+```
+
+- First run: exchanges tokens as normal (paste or `--peer-token`), then
+  **saves** them to `alice.session`, `chmod 600`.
+- Every run after that (same `--session` path): **skips** the paste
+  prompt entirely and reconnects straight from the saved tokens — combine
+  with a manual `--port` (see above) so your own address is likely to
+  come back unchanged too, and the other side's existing background
+  retry (case 1, already running on their end) picks you back up with
+  no action needed on either side.
+- Delete the file any time to force a fresh token exchange — useful if a
+  peer's address has genuinely changed (new network, ISP reassigned
+  their IP) and the old saved token can no longer reach them.
+
+This is opt-in and off by default on purpose: a peer token is a bearer
+secret — anyone holding one can punch/send data straight to that node's
+VPN IP — so unlike every other decentralized setting, it is **never**
+written to disk unless you explicitly pass `--session`. Both `ReVPN.sh`
+and `ReVPN.bat`'s interactive menus ask about this explicitly (y/N,
+defaulting to off) rather than silently defaulting it on.
 
 ---
 

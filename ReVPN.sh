@@ -35,6 +35,10 @@ MODE=""
 # Decentralized-mode defaults (no server — direct token exchange)
 DC_ID=""
 DC_PEER_TOKENS=()
+DC_SESSION=""   # --session <file> — opt-in reconnect-on-restart, see run_decentralized()
+                # in engine/meshvpn.cpp. Empty = off (default): tokens are
+                # bearer secrets and are never written anywhere unless you
+                # explicitly ask for this.
 
 # Stress-test defaults
 ST_CLIENTS=20
@@ -90,6 +94,7 @@ ST_RATE=${ST_RATE}
 ST_SIZE=${ST_SIZE}
 ST_PORT=${ST_PORT}
 DC_ID="${DC_ID}"
+DC_SESSION="${DC_SESSION}"
 EOF
     # Hand ownership back to the real user when we're running under sudo,
     # so their own later non-sudo `./ReVPN.sh` can read AND rewrite it.
@@ -276,6 +281,14 @@ DECENTRALIZED OPTIONS:
   --port <n>           Local UDP port                          (default: 51001)
   --peer-token <tok>   A peer's token — repeat this flag once per peer
                        for a mesh of 3+. Skips the interactive paste prompt.
+  --session <file>     Auto-reconnect on restart: saves this run's peer
+                       tokens to <file> so a crash/restart doesn't need
+                       them re-pasted. Opt-in and sensitive — tokens are
+                       bearer secrets for direct UDP access to this node,
+                       so unlike every other setting here they are NEVER
+                       written anywhere unless you pass this. Written
+                       chmod 600; delete the file to force a fresh
+                       token exchange next run.
   --encrypt <true|false>  Encrypt tunnel traffic               (default: ${ENCRYPT})
 
   No rendezvous/relay server anywhere — each side asks a public STUN
@@ -389,6 +402,10 @@ launch_decentralized() {
         [[ -n "$tok" ]] && args+=(--peer-token "$tok")
     done
     [[ "$ENCRYPT" == "false" ]] && args+=(--no-encrypt)
+    if [[ -n "$DC_SESSION" ]]; then
+        args+=(--session "$DC_SESSION")
+        echo "ReVPN: reconnect-on-restart enabled — session file: $DC_SESSION"
+    fi
 
     echo "ReVPN: decentralized mode — no server, direct token exchange with your peer(s)"
     save_preset
@@ -559,6 +576,24 @@ tui_decentralized_form() {
 
     tui_pick_port "Decentralized" 51001 || return 1
 
+    if tui_yesno "Reconnect on restart" \
+"Save this run's peer tokens to a file, so a crash
+or restart of this node reconnects automatically
+instead of needing them re-pasted?
+
+Opt-in only, because tokens are bearer secrets —
+whoever holds one can punch/data straight to this
+node. The file is written chmod 600 (owner-only).
+Delete it any time to force a fresh token exchange.
+
+Enable session file?"; then
+        DC_SESSION="$(tui_input "Decentralized: Session File" \
+            "Path to save/load peer tokens for reconnect-on-restart" \
+            "${DC_SESSION:-$CONFIG_DIR/session-${DC_ID}.token}" 11 70)" || return 1
+    else
+        DC_SESSION=""
+    fi
+
     tui_yesno "Confirm" \
 "Connect directly to a peer — no server:
 
@@ -566,6 +601,7 @@ tui_decentralized_form() {
   VPN IP     : ${VPN_IP}/${SUBNET}
   Encrypt    : ${ENCRYPT}
   Local port : $([[ "$PORT_SET" == true ]] && echo "$PORT (manual)" || echo "automatic (engine default, 51001)")
+  Session    : $([[ -n "$DC_SESSION" ]] && echo "$DC_SESSION" || echo "off (always re-paste tokens)")
 
 Next: this will drop to a plain screen. It prints a short
 token — send that to every peer you want in the mesh (chat,
@@ -573,7 +609,7 @@ voice, ...) — then asks you to paste each peer's token back,
 one per line (blank line to finish). Everyone connects directly
 to everyone; a 2-peer link or a larger mesh both work the same way.
 
-Proceed?" 21 64 || return 1
+Proceed?" 24 70 || return 1
     return 0
 }
 
@@ -796,6 +832,7 @@ while [[ $# -gt 0 ]]; do
 
         --id)          DC_ID="$2"; shift 2 ;;
         --peer-token)  DC_PEER_TOKENS+=("$2"); shift 2 ;;
+        --session)     DC_SESSION="$2"; shift 2 ;;
 
         --clients)     ST_CLIENTS="$2"; shift 2 ;;
         --duration)    ST_DURATION="$2"; shift 2 ;;

@@ -54,6 +54,9 @@
 #include <cstring>
 #include <fstream>
 #include <map>
+#ifndef _WIN32
+#include <sys/stat.h> // chmod() — session-file permissions, see run_decentralized()
+#endif
 #include <mutex>
 #include <queue>
 #include <shared_mutex>
@@ -2182,7 +2185,8 @@ bool p2p_parse_token(const std::string& token, P2PPeerToken& out) {
 // Entry point for `--mode decentralized`, called from main() below.
 // Returns a process exit code.
 int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str, int subnet, int mtu,
-                       uint16_t local_udp_port, bool enc, const std::vector<std::string>& peer_token_args) {
+                       uint16_t local_udp_port, bool enc, const std::vector<std::string>& peer_token_args,
+                       const std::string& session_file) {
     Client cli;
     cli.my_vpn     = inet_addr(vpn_ip_str.c_str());
     cli.local_port = local_udp_port;
@@ -2236,7 +2240,8 @@ int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str,
            "============================================================\n\n", my_token.c_str());
 
     // Collect one or more peer tokens: pre-supplied via --peer-token
-    // (repeatable, or comma-separated), or pasted interactively one per
+    // (repeatable, or comma-separated), loaded from a --session file left
+    // by a PREVIOUS run of this same node, or pasted interactively one per
     // line until a blank line. Every peer needs everyone else's token —
     // there's no server to introduce them, so mesh size is however many
     // tokens you hand-exchange.
@@ -2251,6 +2256,33 @@ int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str,
             start = comma + 1;
         }
     }
+
+    // Reconnecting after this process was killed/crashed/restarted: skip
+    // re-pasting tokens if we have a --session file from the run that
+    // originally exchanged them. This is opt-in and off by default —
+    // tokens are bearer secrets for direct UDP access to this node, so
+    // unlike every other setting here they're deliberately never written
+    // anywhere unless you explicitly ask for this file (see the warning
+    // printed below, and the README's reconnection section).
+    bool loaded_from_session = false;
+    if (raw_tokens.empty() && !session_file.empty()) {
+        std::ifstream in(session_file);
+        if (in) {
+            std::string line;
+            while (std::getline(in, line)) {
+                if (!line.empty() && line.back() == '\r') line.pop_back(); // CRLF-saved files
+                if (line.empty() || line[0] == '#') continue;
+                raw_tokens.push_back(line);
+            }
+            if (!raw_tokens.empty()) {
+                loaded_from_session = true;
+                printf("[Decentralized] Reconnecting: loaded %zu peer token(s) from %s "
+                       "(skip pasting — delete this file to force a fresh exchange)\n",
+                       raw_tokens.size(), session_file.c_str());
+            }
+        }
+    }
+
     if (raw_tokens.empty()) {
         for (;;) {
             printf("Peer's token (blank to finish): ");
@@ -2263,6 +2295,31 @@ int run_decentralized(const std::string& self_id, const std::string& vpn_ip_str,
     if (raw_tokens.empty()) {
         fprintf(stderr, "[Decentralized] No peer tokens given — nothing to connect to.\n");
         CLOSESOCK(cli.udp_fd); return 1;
+    }
+
+    // Persist this run's tokens for the NEXT restart, if asked to. Tokens
+    // are bearer secrets (whoever holds one can punch/data straight to
+    // this node's VPN IP) — write the file readable only by the owner,
+    // same idea as an SSH private key.
+    if (!session_file.empty() && !loaded_from_session) {
+        std::ofstream out(session_file, std::ios::trunc);
+        if (out) {
+            out << "# ReVPN decentralized session for --id " << self_id
+                << " — peer tokens, one per line. Treat like a private key:\n"
+                << "# anyone with a line here can punch straight to this node.\n"
+                << "# Delete this file to force a fresh token exchange next run.\n";
+            for (const auto& tok : raw_tokens) out << tok << "\n";
+            out.close();
+#ifndef _WIN32
+            chmod(session_file.c_str(), S_IRUSR | S_IWUSR); // 0600
+#endif
+            printf("[Decentralized] Saved session to %s — restarting this node will "
+                   "auto-reconnect without re-pasting tokens, as long as peers are "
+                   "still reachable at the addresses in it\n", session_file.c_str());
+        } else {
+            fprintf(stderr, "[Decentralized] WARN couldn't write session file %s "
+                    "(reconnect-on-restart won't work this run)\n", session_file.c_str());
+        }
     }
 
     std::vector<uint32_t> peer_node_ids;
@@ -2483,6 +2540,11 @@ static void usage(const char* p) {
     printf("  --peer-token tok    (decentralized) a peer's token; repeat this flag\n");
     printf("                      (or comma-separate) for multiple peers — skips\n");
     printf("                      the interactive paste prompt\n");
+    printf("  --session    file   (decentralized) auto-reconnect on restart: saves\n");
+    printf("                      this run's peer tokens here so a crash/restart\n");
+    printf("                      doesn't need them re-pasted. Opt-in and sensitive\n");
+    printf("                      (tokens are bearer secrets) — written chmod 600,\n");
+    printf("                      delete the file to force a fresh token exchange\n");
     printf("  --config     file   Load settings from a flat YAML file (same format\n");
     printf("                      and keys as the ReVPN.sh wrapper's --config, minus\n");
     printf("                      the stress-test-only keys). Any flag also given on\n");
@@ -2572,6 +2634,7 @@ int main(int argc, char* argv[]) {
     uint32_t node_id=0; bool enc=true, xdp_force_copy=false;
     std::string p2p_id;
     std::vector<std::string> peer_tokens;
+    std::string session_file; // --session <file> — decentralized mode only, see run_decentralized()
 
     // A config file's values become the new defaults before the real flag
     // loop below runs, so any flag also given on the command line still
@@ -2622,6 +2685,7 @@ int main(int argc, char* argv[]) {
         else if (a=="--no-encrypt") enc=false;
         else if (a=="--id"          &&i+1<argc) p2p_id=argv[++i];
         else if (a=="--peer-token"  &&i+1<argc) peer_tokens.push_back(argv[++i]);
+        else if (a=="--session"     &&i+1<argc) session_file=argv[++i];
         else if (a=="--help"||a=="-h") { usage(argv[0]); return 0; }
         else { fprintf(stderr,"Unknown: %s\n",a.c_str()); return 1; }
     }
@@ -2634,7 +2698,7 @@ int main(int argc, char* argv[]) {
 #ifndef _WIN32
         signal(SIGPIPE,SIG_IGN);
 #endif
-        return run_decentralized(p2p_id, vpn_ip, subnet, mtu, client_port, enc, peer_tokens);
+        return run_decentralized(p2p_id, vpn_ip, subnet, mtu, client_port, enc, peer_tokens, session_file);
     }
 
     if (mode!="server"&&mode!="client") {

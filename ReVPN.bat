@@ -57,6 +57,7 @@ set "RELAY_ONLY=false"
 set "MODE="
 set "DC_ID="
 set "PEER_TOKENS="
+set "DC_SESSION="
 
 if "%~1"=="" goto MENU
 
@@ -76,6 +77,7 @@ if /i "%~1"=="--encrypt"    (set "ENCRYPT=%~2"  & shift & shift & goto PARSE)
 if /i "%~1"=="--relay-only" (set "RELAY_ONLY=true" & shift & goto PARSE)
 if /i "%~1"=="--id"         (set "DC_ID=%~2"    & shift & shift & goto PARSE)
 if /i "%~1"=="--peer-token" (set "PEER_TOKENS=!PEER_TOKENS! --peer-token %~2" & shift & shift & goto PARSE)
+if /i "%~1"=="--session"    (set "DC_SESSION=%~2" & shift & shift & goto PARSE)
 echo ReVPN: unknown option '%~1' ^(see: ReVPN.bat --help^)
 exit /b 1
 
@@ -208,12 +210,20 @@ if /i "%PORTMODE%"=="m" (
 ) else (
     set "PORT_SET=false"
 )
+set "DC_SESSION="
+set /p "SESS=Save a session file so a crash/restart reconnects without re-pasting tokens? Opt-in - tokens are bearer secrets. (y/N): "
+if /i "%SESS%"=="y" (
+    set "SESS_IN="
+    set /p "SESS_IN=Session file path [%SELF_DIR%config\session-%DC_ID%.token]: "
+    if "%SESS_IN%"=="" (set "DC_SESSION=%SELF_DIR%config\session-%DC_ID%.token") else (set "DC_SESSION=%SESS_IN%")
+)
 echo.
 echo Connect directly to a peer - no server:
 echo   Your name : %DC_ID%
 echo   VPN IP    : %VPN_IP%/%SUBNET%
 echo   Encrypt   : %ENCRYPT%
 if /i "%PORT_SET%"=="true" (echo   Local port : %PORT%) else (echo   Local port : ^(engine default, 51001^))
+if not "%DC_SESSION%"=="" (echo   Session : %DC_SESSION%) else (echo   Session : off ^(always re-paste tokens^))
 echo.
 echo Next: this will print a short token - send that to every peer you want
 echo in the mesh (chat, voice, ...) - then ask you to paste each peer's token
@@ -269,8 +279,13 @@ set "ENCFLAG="
 if /i "%ENCRYPT%"=="false" set "ENCFLAG=--no-encrypt"
 set "PORTFLAG="
 if /i "%PORT_SET%"=="true" set "PORTFLAG=--port %PORT%"
+set "SESSFLAG="
+if not "%DC_SESSION%"=="" (
+    set "SESSFLAG=--session %DC_SESSION%"
+    echo ReVPN: reconnect-on-restart enabled - session file: %DC_SESSION%
+)
 echo ReVPN: decentralized mode - no server, direct token exchange with your peer(s)
-"%ENGINE%" --mode decentralized --id %DC_ID% --vpn-ip %VPN_IP% --subnet %SUBNET%!PEER_TOKENS! %ENCFLAG% %PORTFLAG%
+"%ENGINE%" --mode decentralized --id %DC_ID% --vpn-ip %VPN_IP% --subnet %SUBNET%!PEER_TOKENS! %ENCFLAG% %PORTFLAG% %SESSFLAG%
 exit /b %ERRORLEVEL%
 
 REM ============================================================================
@@ -313,6 +328,12 @@ echo                        port-forward rule across restarts
 echo                        (default: 51001)
 echo   --peer-token ^<tok^>   A peer's token - repeat this flag once per
 echo                        peer for a mesh of 3+. Skips the paste prompt.
+echo   --session ^<file^>     Auto-reconnect on restart: saves this run's
+echo                        peer tokens to ^<file^> so a crash/restart
+echo                        doesn't need them re-pasted. Opt-in and
+echo                        sensitive - tokens are bearer secrets, so
+echo                        unlike every other setting here they are
+echo                        NEVER written unless you pass this.
 echo   --encrypt ^<true^|false^>  Encrypt tunnel traffic              (default: true)
 echo.
 echo   No rendezvous/relay server anywhere - each side asks a public STUN
