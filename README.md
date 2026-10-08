@@ -308,6 +308,20 @@ driver to actually exercise it against) — if it doesn't work, fall
 back to the Linux client, WSL, or ReVPN-py's independent Wintun
 backend.
 
+**If the window just vanishes** right after finishing the decentralized
+token prompt (or any other step) with no visible error: that's a plain
+Windows `.bat` quirk, not a crash you can't see the cause of. Double-
+clicking `ReVPN.bat` opens a console window with no parent `cmd.exe` to
+return to — the instant the engine process exits, for *any* reason
+(success, a crash, missing Administrator rights, missing `wintun.dll`),
+the whole window closes with it, taking any error message with it.
+`ReVPN.bat` now pauses with the error code and a "see the output above"
+message whenever the engine exits non-zero, instead of closing
+immediately — update to the latest version if you're still seeing the
+disappearing-window behavior. If you want to see output either way
+(including a clean exit), run it from an already-open `cmd.exe` window
+(`ReVPN.bat --decentralized ...`) instead of double-clicking it.
+
 ---
 
 ## Step 7 — Server-as-peer (server joins the mesh too)

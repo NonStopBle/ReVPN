@@ -37,6 +37,7 @@ set "ENGINE=%SELF_DIR%build-windows\ReVPN-engine.exe"
 if not exist "%ENGINE%" (
     echo ReVPN: engine not found at "%ENGINE%"
     echo        Build it first: build_windows.sh ^(from Linux/WSL, needs mingw-w64^)
+    call :PAUSE_ON_ERROR 1
     exit /b 1
 )
 
@@ -81,6 +82,7 @@ if /i "%~1"=="--id"         (set "DC_ID=%~2"    & shift & shift & goto PARSE)
 if /i "%~1"=="--peer-token" (set "PEER_TOKENS=!PEER_TOKENS! --peer-token %~2" & shift & shift & goto PARSE)
 if /i "%~1"=="--session"    (set "DC_SESSION=%~2" & shift & shift & goto PARSE)
 echo ReVPN: unknown option '%~1' ^(see: ReVPN.bat --help^)
+call :PAUSE_ON_ERROR 1
 exit /b 1
 
 :AFTERPARSE
@@ -257,15 +259,19 @@ if "%VPN_IP%"=="" (
     echo ReVPN: starting server on 0.0.0.0:%PORT% ^(%WORKERS% workers^), joining mesh as %VPN_IP%/%SUBNET%
 )
 "%ENGINE%" --mode server --bind 0.0.0.0:%PORT% --workers %WORKERS% %SELFPEER%
-exit /b %ERRORLEVEL%
+set "RC=%ERRORLEVEL%"
+call :PAUSE_ON_ERROR %RC%
+exit /b %RC%
 
 :RUNCLIENT
 if not defined VPN_IP (
     echo ReVPN: --client requires --vpn-ip ^<ip^>
+    call :PAUSE_ON_ERROR 1
     exit /b 1
 )
 if not defined CONNECT (
     echo ReVPN: --client requires --connect ^<ip:port^>
+    call :PAUSE_ON_ERROR 1
     exit /b 1
 )
 set "COMM=p2p"
@@ -277,15 +283,19 @@ if /i "%PORT_SET%"=="true" set "PORTFLAG=--port %PORT%"
 echo ReVPN: joining %CONNECT% as %VPN_IP%/%SUBNET%  (mode=%COMM%, encrypt=%ENCRYPT%)
 if /i "%COMM%"=="p2p" echo ReVPN: will try direct UDP hole punching, auto-relay on failure
 "%ENGINE%" --mode client --vpn-ip %VPN_IP% --server %CONNECT% --comm %COMM% --subnet %SUBNET% --mtu %MTU% %ENCFLAG% %PORTFLAG%
-exit /b %ERRORLEVEL%
+set "RC=%ERRORLEVEL%"
+call :PAUSE_ON_ERROR %RC%
+exit /b %RC%
 
 :RUNDECENTRALIZED
 if not defined DC_ID (
     echo ReVPN: --decentralized requires --id ^<name^>
+    call :PAUSE_ON_ERROR 1
     exit /b 1
 )
 if not defined VPN_IP (
     echo ReVPN: --decentralized requires --vpn-ip ^<ip^>
+    call :PAUSE_ON_ERROR 1
     exit /b 1
 )
 set "ENCFLAG="
@@ -299,7 +309,26 @@ if not "%DC_SESSION%"=="" (
 )
 echo ReVPN: decentralized mode - no server, direct token exchange with your peer(s)
 "%ENGINE%" --mode decentralized --id %DC_ID% --vpn-ip %VPN_IP% --subnet %SUBNET% --mtu %MTU%!PEER_TOKENS! %ENCFLAG% %PORTFLAG% %SESSFLAG%
-exit /b %ERRORLEVEL%
+set "RC=%ERRORLEVEL%"
+call :PAUSE_ON_ERROR %RC%
+exit /b %RC%
+
+REM ============================================================================
+REM Keeps the window open on a non-zero exit so a double-clicked ReVPN.bat
+REM (no parent cmd.exe to return output to) doesn't vanish the instant the
+REM engine crashes or refuses to start (missing Administrator, missing
+REM wintun.dll, bad token, TUN setup failure, ...) - without this, the
+REM window closes before anyone can read why. A clean exit (Ctrl+C, normal
+REM shutdown) still closes immediately as before.
+REM ============================================================================
+:PAUSE_ON_ERROR
+if "%~1"=="0" exit /b 0
+echo.
+echo ==============================================================
+echo ReVPN exited with error code %~1 - see the output above for why.
+echo ==============================================================
+pause
+exit /b 0
 
 REM ============================================================================
 :HELP
